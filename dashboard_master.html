@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Master - Opinião Informação Estratégica</title>
+    <style>
+        /* CSS do Dashboard Master - Mantido igual ao arquivo original */
+        :root {
+            --primary: #4A90E2;
+            --primary-dark: #357ABD;
+            --secondary: #1976D2;
+            --bg: #f8f9fa;
+            --sidebar-bg: #ffffff;
+            --text: #333333;
+            --text-light: #666666;
+            --border: #e0e0e0;
+            --hover: #f0f4f8;
+            --active: #e5eef7;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --shadow: 0 2px 10px rgba(0,0,0,0.1);
+            --shadow-lg: 0 4px 20px rgba(0,0,0,0.15);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+        }
+
+        .dashboard-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: var(--sidebar-bg);
+            border-right: 2px solid var(--border);
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            flex-direction: column;
+            transition: width 0.3s ease;
+            z-index: 1000;
+        }
+
+        .sidebar.collapsed {
+            width: 70px;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .sidebar.collapsed .sidebar-header {
+            padding: 15px 5px;
+        }
+
+        .sidebar-header .logo-text {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 5px;
+            transition: all 0.3s ease;
+        }
+
+        .sidebar.collapsed .sidebar-header .logo-text {
+            font-size: 10px;
+            line-height: 1.2;
+        }
+
+        .sidebar-header .subtitle {
+            font-size: 12px;
+            opacity: 0.9;
+            transition: all 0.3s ease;
+        }
+
+        .sidebar.collapsed .sidebar-header .subtitle {
+            display: none;
+        }
+
+        .sidebar-toggle {
+            position: absolute;
+            top: 20px;
+            right: -15px;
+            width: 30px;
+            height: 30px;
+            background: var(--primary);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: var(--shadow);
+            transition: all 0.3s ease;
+            z-index: 1001;
+        }
+
+        .sidebar-toggle:hover {
+            background: var(--primary-dark);
+            transform: scale(1.1);
+        }
+
+        .sidebar-menu {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 0;
+        }
+
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: var(--text);
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-left: 4px solid transparent;
+            position: relative;
+        }
+
+        .menu-item:hover {
+            background: var(--hover);
+            border-left-color: var(--primary);
+        }
+
+        .menu-item.active {
+            background: var(--active);
+            border-left-color: var(--secondary);
+            color: var(--secondary);
+            font-weight: 600;
+        }
+
+        .menu-item .icon {
+            min-width: 24px;
+            width: 24px;
+            height: 24px;
+            margin-right: 12px;
+            font-size: 18px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .sidebar.collapsed .menu-item .icon {
+            margin-right: 0;
+        }
+
+        .menu-item .text {
+            flex: 1;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .sidebar.collapsed .menu-item .text {
+            display: none;
+        }
+
+        .menu-item .expand-icon {
+            font-size: 12px;
+            transform: rotate(0deg);
+            transition: transform 0.3s ease;
+        }
+
+        .menu-item.expanded .expand-icon {
+            transform: rotate(90deg);
+        }
+
+        .sidebar.collapsed .menu-item .expand-icon {
+            display: none;
+        }
+
+        .submenu {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+            background: #f8f9fa;
+            border-left: 2px solid var(--primary);
+        }
+
+        .submenu.expanded {
+            max-height: 500px;
+        }
+
+        .submenu-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 20px 10px 50px;
+            color: var(--text-light);
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .submenu-item:hover {
+            background: var(--hover);
+            border-left-color: var(--primary);
+            color: var(--text);
+        }
+
+        .submenu-item.active {
+            background: var(--active);
+            border-left-color: var(--secondary);
+            color: var(--secondary);
+            font-weight: 600;
+        }
+
+        .sidebar.collapsed .submenu {
+            display: none;
+        }
+
+        .tooltip {
+            position: absolute;
+            left: 80px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #333;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 1000;
+        }
+
+        .sidebar.collapsed .menu-item:hover .tooltip {
+            opacity: 0.9;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg);
+        }
+
+        .main-header {
+            background: white;
+            border-bottom: 1px solid var(--border);
+            padding: 20px 30px;
+            box-shadow: var(--shadow);
+            z-index: 100;
+        }
+
+        .main-header h1 {
+            font-size: 24px;
+            color: var(--primary);
+            margin-bottom: 5px;
+        }
+
+        .main-header .subtitle {
+            color: var(--text-light);
+            font-size: 14px;
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+            font-size: 14px;
+            color: var(--text-light);
+        }
+
+        .breadcrumb-item {
+            color: var(--text-light);
+        }
+
+        .breadcrumb-item.active {
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .breadcrumb-separator {
+            margin: 0 8px;
+            color: var(--border);
+        }
+
+        .content-frame {
+            flex: 1;
+            border: none;
+            background: white;
+            margin: 20px;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            font-size: 18px;
+            color: var(--text-light);
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid var(--border);
+            border-top: 4px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .welcome {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .welcome-icon {
+            font-size: 64px;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+
+        .welcome h2 {
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+
+        .welcome p {
+            color: var(--text-light);
+            margin-bottom: 30px;
+            max-width: 500px;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                position: absolute;
+                left: -300px;
+                width: 300px;
+                z-index: 1000;
+                transition: left 0.3s ease;
+            }
+
+            .sidebar.mobile-open {
+                left: 0;
+            }
+
+            .sidebar.collapsed {
+                left: -300px;
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+
+            .sidebar-toggle {
+                position: fixed;
+                top: 20px;
+                left: 20px;
+                right: auto;
+            }
+        }
+
+        .menu-add {
+            padding: 15px 20px;
+            border-top: 1px solid var(--border);
+            background: #f8f9fa;
+        }
+
+        .btn-add {
+            width: 100%;
+            padding: 10px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-add:hover {
+            background: var(--primary-dark);
+        }
+
+        .sidebar.collapsed .menu-add {
+            display: none;
+        }
+
+        .info-box {
+            background: #f0f9ff;
+            border: 1px solid #0ea5e9;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+            color: #0369a1;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-text">Dashboard Master</div>
+                <div class="subtitle">Opinião Informação Estratégica</div>
+            </div>
+
+            <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">⟵</button>
+
+            <nav class="sidebar-menu" id="sidebarMenu">
+                <!-- Menu será gerado pelo JavaScript -->
+            </nav>
+        </div>
+
+        <div class="main-content">
+            <header class="main-header">
+                <h1 id="mainTitle">Dashboard Master</h1>
+                <p class="subtitle" id="mainSubtitle">Selecione uma análise no menu lateral</p>
+                <nav class="breadcrumb" id="breadcrumb">
+                    <span class="breadcrumb-item active">Início</span>
+                </nav>
+            </header>
+
+            <iframe class="content-frame" id="contentFrame" style="display: none;"></iframe>
+            
+            <div class="welcome" id="welcomeState">
+                <div class="welcome-icon">📊</div>
+                <h2>Dashboard Master - Configurado</h2>
+                <p>Dashboard gerado automaticamente em 02/12/2025 às 10:04</p>
+                
+                <div class="info-box">
+                    <strong>📁 Configuração atual:</strong><br>
+                    3 grupos, 2 análises individuais, 8 subitens
+                </div>
+
+                <div style="background: var(--hover); padding: 20px; border-radius: 8px; margin-top: 20px;">
+                    <h3 style="color: var(--primary); margin-bottom: 10px;">Instruções:</h3>
+                    <ol style="text-align: left; color: var(--text); line-height: 1.8;">
+                        <li>Navegue pelo menu lateral para acessar as análises</li>
+                        <li>Use o botão ⟵ para recolher/expandir a barra lateral</li>
+                        <li>Para adicionar novas análises, use o gerenciador Python</li>
+                        <li>Arquivos HTML devem estar na mesma pasta deste dashboard</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="loading" id="loadingState" style="display: none;">
+                <div class="loading-spinner"></div>
+                Carregando análise...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const menuConfig = {"title": "Dashboard Master - Opinião Informação Estratégica", "created": "2025-12-02T10:04:33.704218", "items": [{"id": "home", "title": "Início", "icon": "🏠", "type": "action", "action": "showWelcome"}, {"id": "pesquisas-mercado", "title": "Pesquisas de Mercado", "icon": "📈", "type": "group", "expanded": true, "children": [{"id": "perfil-consumidor", "title": "Perfil do Consumidor", "file": "perfil_consumidor_dashboard.html", "description": "Análise demográfica e comportamental"}, {"id": "tendencias-mercado", "title": "Tendências de Mercado", "file": "tendencias_mercado_dashboard.html", "description": "Evolução do mercado e projeções"}, {"id": "concorrencia", "title": "Análise da Concorrência", "file": "analise_concorrencia_dashboard.html", "description": "Posicionamento competitivo"}]}, {"id": "satisfacao-clientes", "title": "Satisfação de Clientes", "icon": "⭐", "type": "group", "expanded": false, "children": [{"id": "nps-geral", "title": "NPS Geral", "file": "nps_geral_dashboard.html", "description": "Net Promoter Score consolidado"}, {"id": "satisfacao-produtos", "title": "Satisfação por Produto", "file": "satisfacao_produtos_dashboard.html", "description": "Avaliação específica por linha de produto"}, {"id": "sugestoes-melhorias", "title": "Sugestões e Melhorias", "file": "sugestoes_melhorias_dashboard.html", "description": "Feedback qualitativo dos clientes"}]}, {"id": "pesquisa-colaboradores", "title": "Clima Organizacional", "icon": "👥", "type": "group", "expanded": false, "children": [{"id": "engajamento", "title": "Engajamento", "file": "engajamento_dashboard.html", "description": "Níveis de engajamento por área"}, {"id": "lideranca", "title": "Avaliação de Liderança", "file": "lideranca_dashboard.html", "description": "Feedback sobre gestores e líderes"}]}, {"id": "relatorio-executivo", "title": "Relatório Executivo", "icon": "📋", "type": "file", "file": "relatorio_executivo_dashboard.html", "description": "Síntese executiva de todas as pesquisas"}, {"id": "benchmarks", "title": "Benchmarks Setoriais", "icon": "📊", "type": "file", "file": "benchmarks_dashboard.html", "description": "Comparações com indicadores do setor"}]};
+        let currentSidebarState = 'expanded';
+        let currentMenuItem = null;
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            
+            if (currentSidebarState === 'expanded') {
+                sidebar.classList.add('collapsed');
+                toggleBtn.innerHTML = '⟶';
+                currentSidebarState = 'collapsed';
+            } else {
+                sidebar.classList.remove('collapsed');
+                toggleBtn.innerHTML = '⟵';
+                currentSidebarState = 'expanded';
+            }
+        }
+
+        function renderMenu() {
+            const menuContainer = document.getElementById('sidebarMenu');
+            menuContainer.innerHTML = '';
+
+            menuConfig.items.forEach(item => {
+                if (item.type === 'group') {
+                    renderMenuGroup(menuContainer, item);
+                } else {
+                    renderMenuItem(menuContainer, item);
+                }
+            });
+        }
+
+        function renderMenuGroup(container, group) {
+            const groupItem = document.createElement('div');
+            groupItem.className = `menu-item ${group.expanded ? 'expanded' : ''}`;
+            groupItem.innerHTML = `
+                <span class="icon">${group.icon}</span>
+                <span class="text">${group.title}</span>
+                <span class="expand-icon">▶</span>
+                <div class="tooltip">${group.title}</div>
+            `;
+
+            groupItem.addEventListener('click', () => {
+                group.expanded = !group.expanded;
+                groupItem.classList.toggle('expanded', group.expanded);
+                submenu.classList.toggle('expanded', group.expanded);
+            });
+
+            container.appendChild(groupItem);
+
+            const submenu = document.createElement('div');
+            submenu.className = `submenu ${group.expanded ? 'expanded' : ''}`;
+
+            group.children.forEach(child => {
+                const submenuItem = document.createElement('div');
+                submenuItem.className = 'submenu-item';
+                submenuItem.innerHTML = `<span class="text">${child.title}</span>`;
+
+                submenuItem.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    loadContent(child);
+                    updateActiveState(submenuItem);
+                    updateBreadcrumb([group.title, child.title]);
+                });
+
+                submenu.appendChild(submenuItem);
+            });
+
+            container.appendChild(submenu);
+        }
+
+        function renderMenuItem(container, item) {
+            const menuItem = document.createElement('div');
+            menuItem.className = 'menu-item';
+            menuItem.innerHTML = `
+                <span class="icon">${item.icon}</span>
+                <span class="text">${item.title}</span>
+                <div class="tooltip">${item.title}</div>
+            `;
+
+            menuItem.addEventListener('click', () => {
+                if (item.type === 'action') {
+                    if (item.action === 'showWelcome') {
+                        showWelcome();
+                    }
+                } else if (item.type === 'file') {
+                    loadContent(item);
+                }
+                updateActiveState(menuItem);
+                updateBreadcrumb([item.title]);
+            });
+
+            container.appendChild(menuItem);
+        }
+
+        function loadContent(item) {
+            const frame = document.getElementById('contentFrame');
+            const welcome = document.getElementById('welcomeState');
+            const loading = document.getElementById('loadingState');
+            const title = document.getElementById('mainTitle');
+            const subtitle = document.getElementById('mainSubtitle');
+
+            welcome.style.display = 'none';
+            frame.style.display = 'none';
+            loading.style.display = 'flex';
+
+            title.textContent = item.title;
+            subtitle.textContent = `Carregando ${item.file}...`;
+
+            setTimeout(() => {
+                frame.src = item.file;
+                frame.onload = () => {
+                    loading.style.display = 'none';
+                    frame.style.display = 'block';
+                    subtitle.textContent = `Arquivo: ${item.file}`;
+                };
+
+                frame.onerror = () => {
+                    loading.style.display = 'none';
+                    welcome.style.display = 'flex';
+                    welcome.innerHTML = `
+                        <div class="welcome-icon" style="color: #ef4444;">❌</div>
+                        <h2 style="color: #ef4444;">Arquivo não encontrado</h2>
+                        <p>O arquivo "${item.file}" não foi encontrado. Verifique se está na mesma pasta.</p>
+                        <div class="info-box">
+                            <strong>Dica:</strong> Certifique-se de que o arquivo HTML foi gerado pelo script SPSS 
+                            e está na mesma pasta que este dashboard.
+                        </div>
+                    `;
+                    subtitle.textContent = `Erro ao carregar ${item.file}`;
+                };
+            }, 500);
+        }
+
+        function showWelcome() {
+            const frame = document.getElementById('contentFrame');
+            const welcome = document.getElementById('welcomeState');
+            const loading = document.getElementById('loadingState');
+            const title = document.getElementById('mainTitle');
+            const subtitle = document.getElementById('mainSubtitle');
+
+            frame.style.display = 'none';
+            loading.style.display = 'none';
+            welcome.style.display = 'flex';
+
+            title.textContent = 'Dashboard Master';
+            subtitle.textContent = 'Selecione uma análise no menu lateral';
+        }
+
+        function updateActiveState(activeElement) {
+            document.querySelectorAll('.menu-item.active, .submenu-item.active').forEach(el => {
+                el.classList.remove('active');
+            });
+            activeElement.classList.add('active');
+            currentMenuItem = activeElement;
+        }
+
+        function updateBreadcrumb(path) {
+            const breadcrumb = document.getElementById('breadcrumb');
+            breadcrumb.innerHTML = path.map((item, index) => {
+                const isLast = index === path.length - 1;
+                return `
+                    <span class="breadcrumb-item ${isLast ? 'active' : ''}">${item}</span>
+                    ${!isLast ? '<span class="breadcrumb-separator">›</span>' : ''}
+                `;
+            }).join('');
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            renderMenu();
+            showWelcome();
+            updateBreadcrumb(['Início']);
+            
+            const homeItem = document.querySelector('.menu-item');
+            if (homeItem) {
+                homeItem.classList.add('active');
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            if (window.innerWidth <= 768) {
+                if (currentSidebarState === 'expanded') {
+                    document.getElementById('sidebar').classList.add('mobile-open');
+                }
+            } else {
+                document.getElementById('sidebar').classList.remove('mobile-open');
+            }
+        });
+    </script>
+</body>
+</html>

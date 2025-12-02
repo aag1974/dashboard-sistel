@@ -1,0 +1,19 @@
+{
+  "title": "Dashboard Master - Header Overlay",
+  "created": "2025-11-27T09:31:04.218699",
+  "architecture": "header_overlay",
+  "description": "Sistema onde header SPSS sobrepõe interface e sidebar navega",
+  "items": [
+    {
+      "id": "comunicacao",
+      "title": "Comunicação",
+      "file": "comunicacao.html",
+      "description": "",
+      "overlay": true,
+      "added": "2025-12-02T10:09:32.241988",
+      "icon": "🎯",
+      "type": "file"
+    }
+  ],
+  "updated": "2025-12-02T10:09:32.242185"
+}
