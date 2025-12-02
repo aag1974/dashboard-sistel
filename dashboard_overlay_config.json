@@ -7,13 +7,36 @@
     {
       "id": "comunicacao",
       "title": "Comunicação",
-      "file": "comunicacao.html",
-      "description": "",
-      "overlay": true,
-      "added": "2025-12-02T10:09:32.241988",
-      "icon": "🎯",
-      "type": "file"
+      "icon": "📁",
+      "type": "group",
+      "expanded": false,
+      "children": [
+        {
+          "id": "2022",
+          "title": "2022",
+          "file": "2022.html",
+          "description": "",
+          "overlay": true,
+          "added": "2025-12-02T10:52:07.750712"
+        },
+        {
+          "id": "2023",
+          "title": "2023",
+          "file": "2023.html",
+          "description": "",
+          "overlay": true,
+          "added": "2025-12-02T10:52:42.012056"
+        },
+        {
+          "id": "2024/2025",
+          "title": "2024/2025",
+          "file": "comunicacao.html",
+          "description": "",
+          "overlay": true,
+          "added": "2025-12-02T10:53:34.408088"
+        }
+      ]
     }
   ],
-  "updated": "2025-12-02T10:09:32.242185"
+  "updated": "2025-12-02T10:55:20.018912"
 }
