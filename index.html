@@ -421,13 +421,13 @@
         <div class="main-content">
             <iframe class="content-frame" id="contentFrame" style="display: none;"></iframe>
             
-            <div class="welcome" id="welcomeState">
+            <div class="welcome" id="welcomeState" style="display: none;">
                 <div class="welcome-icon">🎯</div>
                 <h2>Dashboard Master - Header Overlay</h2>
                 <p>Sistema otimizado onde análises SPSS sobrepõem toda a interface com header próprio, mantendo apenas sidebar para navegação.</p>
                 
                 <div class="feature-highlight">
-                    <h3>🚀 Arquitetura Header Overlay</h3>
+                    <h3>🚀 Arquitetura v2.0</h3>
                     <ul style="text-align: left; line-height: 1.8;">
                         <li>✅ <strong>Header SPSS fixo</strong> sobrepõe toda a tela</li>
                         <li>✅ <strong>Filtros compactos</strong> em linha única no header</li>
@@ -440,7 +440,7 @@
                 <div style="background: var(--hover); padding: 20px; border-radius: 8px; margin-top: 20px;">
                     <h3 style="color: var(--primary); margin-bottom: 10px;">Como usar:</h3>
                     <ol style="text-align: left; color: var(--text); line-height: 1.8;">
-                        <li>Gere análises com <code>criar_dashboard_header_overlay.py</code></li>
+                        <li>Gere análises com <code>criar_dashboard_v2.py</code></li>
                         <li>Adicione no menu usando este gerenciador</li>
                         <li>Navegue - cada análise ocupa toda a tela</li>
                         <li>Use sidebar para trocar entre análises</li>
@@ -450,13 +450,13 @@
 
             <div class="loading" id="loadingState" style="display: none;">
                 <div class="loading-spinner"></div>
-                Carregando análise com header overlay...
+                Carregando análise v2.0...
             </div>
         </div>
     </div>
 
     <script>
-        const menuConfig = {"title": "Dashboard Master - Header Overlay", "created": "2025-11-27T09:31:04.218699", "architecture": "header_overlay", "description": "Sistema onde header SPSS sobrepõe interface e sidebar navega", "items": [{"id": "comunicacao", "title": "Comunicação", "icon": "🌐", "type": "group", "expanded": false, "children": [{"id": "2022", "title": "2022", "file": "2022.html", "description": "", "overlay": true, "added": "2025-12-02T11:06:20.877427"}, {"id": "2023", "title": "2023", "file": "2023.html", "description": "", "overlay": true, "added": "2025-12-02T11:06:36.595238"}, {"id": "2024/2025", "title": "2024/2025", "file": "comunicacao.html", "description": "", "overlay": true, "added": "2025-12-02T11:06:53.605106"}]}], "updated": "2025-12-02T11:13:28.402664", "client_logo": "https://raw.githubusercontent.com/aag1974/dashboard-sistel/main/logo-sistel.png"};
+        const menuConfig = {"title": "Dashboard Master - Header Overlay", "created": "2025-11-27T09:31:04.218699", "architecture": "header_overlay", "description": "Sistema onde header SPSS sobrepõe interface e sidebar navega", "items": [{"id": "comunicacao", "title": "Comunicação", "icon": "🌐", "type": "group", "expanded": false, "children": [{"id": "2022", "title": "2022", "file": "2022.html", "description": "", "overlay": true, "added": "2025-12-02T11:06:20.877427"}, {"id": "2023", "title": "2023", "file": "2023.html", "description": "", "overlay": true, "added": "2025-12-02T11:06:36.595238"}, {"id": "2024/2025", "title": "2024/2025", "file": "comunicacao.html", "description": "", "overlay": true, "added": "2025-12-02T11:06:53.605106"}]}], "updated": "2025-12-02T11:36:14.047064", "client_logo": "https://raw.githubusercontent.com/aag1974/dashboard-sistel/main/logo-sistel.png"};
         let currentSidebarState = 'expanded';
         let currentMenuItem = null;
         let currentAnalysisFrame = null;
@@ -625,7 +625,7 @@
                 frame.onload = () => {
                     loading.style.display = 'none';
                     frame.style.display = 'block';
-                    console.log(`✅ ${item.title} carregado com header overlay`);
+                    console.log(`✅ ${item.title} carregado v2.0`);
                 };
 
                 frame.onerror = () => {
@@ -636,7 +636,7 @@
                         <h2 style="color: #ef4444;">Arquivo não encontrado</h2>
                         <p>O arquivo "${item.file}" não foi encontrado.</p>
                         <div style="background: #fef3c7; border: 1px solid #f59e0b; padding: 15px; border-radius: 8px; margin: 20px 0; color: #92400e;">
-                            <strong>💡 Dica:</strong> Use o <code>criar_dashboard_header_overlay.py</code> 
+                            <strong>💡 Dica:</strong> Use o <code>criar_dashboard_v2.py</code> 
                             para gerar análises compatíveis.
                         </div>
                     `;
@@ -690,15 +690,48 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             renderMenu();
-            showWelcome();
+            loadFirstMenuItem();
             
-            const homeItem = document.querySelector('.menu-item');
-            if (homeItem) {
-                homeItem.classList.add('active');
+            console.log('🎯 Dashboard Master v2.0 carregado!');
+        });
+
+        function loadFirstMenuItem() {
+            // Procura o primeiro item que não é "home" (início)
+            for (let item of menuConfig.items) {
+                if (item.type === 'file' && item.file) {
+                    // Carrega primeiro arquivo individual
+                    loadContent(item);
+                    document.querySelector(`[data-id="${item.id}"]`)?.classList.add('active');
+                    return;
+                } else if (item.type === 'group' && item.children && item.children.length > 0) {
+                    // Carrega primeiro item do primeiro grupo
+                    const firstChild = item.children.find(child => child.file);
+                    if (firstChild) {
+                        loadContent(firstChild);
+                        
+                        // Expande o grupo e marca item ativo
+                        const groupElement = document.querySelector(`[data-id="${item.id}"]`);
+                        if (groupElement) {
+                            groupElement.classList.add('expanded');
+                            const childElement = document.querySelector(`[data-id="${firstChild.id}"]`);
+                            if (childElement) {
+                                childElement.classList.add('active');
+                            }
+                        }
+                        return;
+                    }
+                }
             }
             
-            console.log('🎯 Dashboard Master - Header Overlay carregado!');
-        });
+            // Fallback: se não encontrar nenhum item, esconde welcome e mostra tela vazia
+            const frame = document.getElementById('contentFrame');
+            const welcome = document.getElementById('welcomeState');
+            const loading = document.getElementById('loadingState');
+            
+            welcome.style.display = 'none';
+            frame.style.display = 'none';
+            loading.style.display = 'none';
+        }
 
         function sendCommandToAnalysis(command, data = {}) {
             if (currentAnalysisFrame) {
