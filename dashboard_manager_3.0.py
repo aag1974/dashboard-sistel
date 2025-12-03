@@ -987,7 +987,7 @@ class DashboardManagerOverlay:
 
             <div class="loading" id="loadingState" style="display: none;">
                 <div class="loading-spinner"></div>
-                Carregando análise v2.0...
+                Carregando Dados...
             </div>
         </div>
     </div>
