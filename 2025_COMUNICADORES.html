@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard SPSS Universal</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <script>
+    // Ordem original das categorias vinda do SPSS
+    const VARS_VALUE_ORDER = {"P1": ["Prevenção — caso ele(a) precise no futuro", "Porque ele(a) depende do meu auxílio", "Costumo ajudar em questões burocráticas", "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "Sou o(a) cuidador(a) principal"], "P2": ["Simples", "Um pouco burocrático", "Não lembra"], "P3": ["Muito importante", "Importante, mas pode melhorar", "Indiferente", "Não sabe avaliar"], "P4_1": ["Not Selected", "Yes"], "P4_2": ["Not Selected", "Yes"], "P4_3": ["Not Selected", "Yes"], "P5": ["Muito satisfeito", "Satisfeito", "Indiferente", "Insatisfeito", "Muito insatisfeito", "Ainda não precisei realizar nenhum contato"], "P6": ["Instagram", "Facebook", "Site na internet", "WhatsApp – Via atendimento", "SMS", "E-mail", "Central de Relacionamento –  Via atendimento"], "P7": ["Aplicativo com menus exclusivos", "Página exclusiva para o comunicador no site da Sistel", "Canal de transmissão no Whatsapp", "E-mail", "Outros", "Todos", "Não sabe"], "P8": ["Várias vezes ao dia", "Diariamente", "Algumas vezes por semana", "Raramente", "Nunca"], "P10": ["Consigo encontrar as informações com facilidade", "Consigo encontrar as informações, mas com dificuldade", "Não encontro informações necessárias", "Nunca acessei o site da Sistel"], "P11": ["Presencial", "Online", "Ambos"], "P12": ["Entende tudo com facilidade", "Entende em parte e às vezes precisa de ajuda", "Entende em parte e sempre busca ajuda", "Tem dificuldade para entender", "Não sabe avaliar / não costuma acompanhar"], "P13._": ["Muito satisfeito", "Satisfeito", "Indiferente", "Insatisfeito", "Muito insatisfeito", "Não sabe avaliar"], "ENCERRAMENTO": ["OK-ENTREVISTA REALIZADA E CONCLUÍDA", "{OUTCOME18} INCOMPLETO - CAIU LIGAÇÃO", "{OUTCOME9} INCOMPLETO - RECUSOU CONTINUAR"]};
+    </script>
+
+    <style>
+        :root {
+            --primary: #4A90E2;
+            --primary-dark: #357ABD;
+            --success: #4CAF50;
+            --warning: #FF9800;
+            --info: #9C27B0;
+            --background: #f8f9fa;
+            --text: #333;
+            --border: #e5e5e5;
+            --radius: 8px;
+            --shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--background);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 15px;
+            padding-top: 140px; /* Aumentado de 100px para 140px */
+        }
+
+        .filters-container {
+            background: white;
+            border-radius: 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            border: none;
+            border-bottom: 1px solid var(--border);
+
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 9999;
+            width: 100%;
+
+            margin-bottom: 0;
+        }
+
+        .content {
+            margin-top: 40px; /* Aumentado de 30px para 40px para maior segurança */
+        }
+
+        .filters-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 20px; /* Reduzido de 16px para 12px */
+            background: #f8f9fa;
+            border-bottom: 1px solid var(--border);
+            border-radius: 0;
+        }
+
+        .filter-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text);
+            margin: 0;
+        }
+
+        .filter-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: white;
+        }
+
+        .apply-btn {
+            background: var(--success);
+            color: white;
+            border-color: var(--success);
+        }
+
+        .apply-btn:hover {
+            background: #45a049;
+            border-color: #45a049;
+        }
+
+        .clear-btn {
+            background: #f8f9fa;
+            color: var(--text);
+        }
+
+        .clear-btn:hover {
+            background: #e9ecef;
+        }
+
+        .export-btn {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .export-btn:hover {
+            background: var(--primary-dark);
+            border-color: var(--primary-dark);
+        }
+
+        .filters-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            padding: 16px 20px; /* Reduzido de 20px para 16px */
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .filter-label {
+            font-weight: 600;
+            color: var(--text);
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+
+        .custom-dropdown {
+            position: relative;
+        }
+
+        .dropdown-button {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s ease;
+            font-size: 13px;
+        }
+
+        .dropdown-button:hover {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 1px rgba(74, 144, 226, 0.1);
+        }
+
+        .dropdown-button.open {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.1);
+        }
+
+        .dropdown-content {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            margin-top: 2px;
+        }
+
+        .dropdown-content.show {
+            display: block;
+        }
+
+        .dropdown-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            font-size: 13px;
+        }
+
+        .dropdown-option:hover {
+            background: #f8f9fa;
+        }
+
+        .dropdown-option.select-all {
+            background: #f1f3f4;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .dropdown-option input[type="checkbox"] {
+            margin: 0;
+        }
+
+        .dropdown-option label {
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .arrow {
+            transition: transform 0.2s ease;
+            color: #666;
+            font-size: 12px;
+        }
+
+        .dropdown-button.open .arrow {
+            transform: rotate(180deg);
+        }
+
+        .content {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .section {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .section-header {
+            background: #f8f9fa;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-subtitle {
+            font-size: 13px;
+            color: #6c757d;
+        }
+
+        .section-content {
+            padding: 20px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 350px;
+            margin-bottom: 15px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            margin-top: 15px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 10px 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        td {
+            font-size: 13px;
+        }
+
+        .percent-bar {
+            background: #f1f3f4;
+            border-radius: 4px;
+            height: 18px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .percent-fill {
+            background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+            height: 100%;
+            transition: width 0.8s ease;
+        }
+
+        /* Responsivo */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+                padding-top: 160px; /* Aumentado para mobile */
+            }
+            
+            .filters-grid {
+                grid-template-columns: 1fr;
+                padding: 15px;
+                gap: 12px;
+            }
+            
+            .filter-actions {
+                flex-direction: column;
+                gap: 6px;
+            }
+            
+            .filter-btn {
+                font-size: 12px;
+                padding: 6px 12px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .filters-header {
+                flex-direction: column;
+                gap: 12px;
+                align-items: stretch;
+            }
+            
+            .filter-actions {
+                flex-direction: row;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="filters-container">
+        <div class="filters-header">
+            <h2 class="filter-title">🔍 Filtros de Seleção</h2>
+            <div class="filter-actions">
+                <button class="filter-btn apply-btn" onclick="applyFilters()">✓ Aplicar</button>
+                <button class="filter-btn clear-btn" onclick="clearFilters()">🔄 Limpar</button>
+                <button class="filter-btn export-btn" onclick="exportAllTables()">⬇️ Exportar</button>
+            </div>
+        </div>
+        <div class="filters-grid" id="filtersGrid">
+            <!-- Filtros gerados dinamicamente -->
+        </div>
+    </div>
+
+    <div class="content" id="content">
+        <!-- Conteúdo gerado dinamicamente -->
+    </div>
+
+    <script>
+        // DADOS GLOBAIS - JSONs seguros
+        const VARS_META = [{"name": "P1", "title": "P1. O que o motivou a aceitar ser comunicador do(a) [nome do assistido]? ESTIMULADA - RU", "type": "single", "spss_type": "Categórica (Nominal)", "sheet_code": "P1", "var_type": "categorical", "measure": "nominal", "mr_subtype": null, "stats": null}, {"name": "P2", "title": "P2. Quando fez o cadastro como comunicador do(a) [nome do assistido], achou o processo: ESTIMULADA - RU", "type": "single", "spss_type": "Categórica (Nominal)", "sheet_code": "P2", "var_type": "categorical", "measure": "nominal", "mr_subtype": null, "stats": null}, {"name": "P3", "title": "P3. Na sua opinião, qual a importância do Programa Comunicador para o assistido? ESTIMULADA - RU", "type": "single", "spss_type": "Categórica (Ordinal)", "sheet_code": "P3", "var_type": "categorical", "measure": "ordinal", "mr_subtype": null, "stats": null}, {"name": "mr_p4", "title": "P4. Qual é o assunto do seu interesse para tratar com a Sistel como comunicador? ESTIMULADA - RM", "type": "mr", "spss_type": "Resposta Múltipla", "sheet_code": "mr_p4", "var_type": "multiple_response", "measure": null, "mr_subtype": "binary", "stats": null}, {"name": "P4_other", "title": "[Outro] P4. Qual é o assunto do seu interesse para tratar com a Sistel como comunicador? ESTIMULADA - RM", "type": "string", "spss_type": "Resposta Aberta", "sheet_code": "P4_other", "var_type": "string", "measure": null, "mr_subtype": null, "stats": null}, {"name": "P5", "title": "P5. Pensando nos atendimentos que teve desde que se tornou comunicador, como avalia sua satisfação geral? ESTIMULADA - RU", "type": "single", "spss_type": "Categórica (Ordinal)", "sheet_code": "P5", "var_type": "categorical", "measure": "ordinal", "mr_subtype": null, "stats": null}, {"name": "P6", "title": "P6. Se pudesse escolher apenas um canal para receber informações da Sistel, qual escolheria? ESTIMULADA - RU", "type": "single", "spss_type": "Categórica (Nominal)", "sheet_code": "P6", "var_type": "categorical", "measure": "nominal", "mr_subtype": null, "stats": null}, {"name": "P7", "title": "P7. Agora pensando no Programa Comunicador: por qual canal você gostaria de receber informações e serviços exclusivos? ESTIMULADA - RU", "type": "single", "spss_type": "Categórica (Nominal)", "sheet_code": "P7", "var_type": "categorical", "measure": "nominal", "mr_subtype": null, "stats": null}, {"name": "P8", "title": "P8. Com que frequência o(a) sr(a) costuma acessar seus e-mails? ESTIMULADA - RU", "type": "single", "spss_type": "Categórica (Ordinal)", "sheet_code": "P8", "var_type": "categorical", "measure": "ordinal", "mr_subtype": null, "stats": null}, {"name": "P9", "title": "P9. Qual sua opinião sobre a quantidade de comunicados enviados pela Sistel, por email ou mensagem SMS? ABERTA", "type": "string", "spss_type": "Resposta Aberta", "sheet_code": "P9", "var_type": "string", "measure": null, "mr_subtype": null, "stats": null}, {"name": "P10", "title": "P10. Sobre o site da Sistel, você considera: ESTIMULADA - RU", "type": "single", "spss_type": "Categórica (Ordinal)", "sheet_code": "P10", "var_type": "categorical", "measure": "ordinal", "mr_subtype": null, "stats": null}, {"name": "P11", "title": "P11. Você já participou de algum evento da Sistel, presencial, online, ambos?", "type": "single", "spss_type": "Categórica (Nominal)", "sheet_code": "P11", "var_type": "categorical", "measure": "nominal", "mr_subtype": null, "stats": null}, {"name": "P11_other", "title": "[Nenhum, Porquê?] P11. Você já participou de algum evento da Sistel, presencial, online, ambos?", "type": "string", "spss_type": "Resposta Aberta", "sheet_code": "P11_other", "var_type": "string", "measure": null, "mr_subtype": null, "stats": null}, {"name": "P12", "title": "P12. Em geral, sobre as informações enviadas pela Sistel, você diria que: ESTIMULADA - RU", "type": "single", "spss_type": "Categórica (Ordinal)", "sheet_code": "P12", "var_type": "categorical", "measure": "ordinal", "mr_subtype": null, "stats": null}, {"name": "P13._", "title": "P13. De forma geral, qual o seu grau de satisfação com o Programa Comunicador da Sistel? ESTIMULADA - RU", "type": "single", "spss_type": "Categórica (Ordinal)", "sheet_code": "P13._", "var_type": "categorical", "measure": "ordinal", "mr_subtype": null, "stats": null}, {"name": "P14", "title": "P14. Para finalizar, você teria alguma sugestão para melhorar o Programa Comunicador da Sistel?", "type": "string", "spss_type": "Resposta Aberta", "sheet_code": "P14", "var_type": "string", "measure": null, "mr_subtype": null, "stats": null}];
+        const FILTERS_META = [];
+        const RECORDS = [{"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "BOA", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "TRABALHO", "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "TRANQUILO", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "TRABALHO", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "IMPORTANTE", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "TRABALHO", "P12": "Entende tudo com facilidade", "P13._": "Indiferente", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "Excelente", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "Trabalho", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Várias vezes ao dia", "P9": "BOA", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "TEMPO", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "SMS", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "BOA", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "TEMPO", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "NORMAL", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "TEMPO", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "OTIMO", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "TEMPO", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "EXCELENTE", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "TEMPO", "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": "TER A FACILIDADE DE ENCONTRAR MEDICOS."}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Insatisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "Boa", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "Tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "Mais acesso as informações fica restrito"}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "Tranquilo", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "Tempo", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "Ok", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "Tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Não lembra", "P3": "Muito importante", "mr_p4": [], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "Normal", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "Tempo", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Algumas vezes por semana", "P9": "Repetitivas", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "Tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Não sabe avaliar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "tempo", "P12": "Entende em parte e sempre busca ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Não sabe avaliar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Indiferente", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "boa", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "boa, fica informada", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "prefere receber por email", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "razoavel", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "regular", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "mais informações pelo wpp"}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Outros"], "P4_other": "pagamentos", "P5": "Satisfeito", "P6": "Site na internet", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "satisfeita", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "suficientes", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "tempo", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "bem comunicativo", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "tempo", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Um pouco burocrático", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "normais, satisfatorios", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "tempo", "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": "mais facil os esclarecimentos"}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Aplicativo com menus exclusivos", "P8": "Diariamente", "P9": "normal", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "pra ter acesso ao cadastro, precisa de usuário e senha, e para um senhor lembrar, e só ele tem o acesso, deveria ter um acesso ao comunicador, ao menos para recuperar a conta caso ocorra alguma situação."}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "NORMAL", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "SEM TEMPO", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": "CENTRALIZAR AS INFORMACOES NUM UNICO CANAL."}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Um pouco burocrático", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Insatisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "Normal", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "Sem tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "Atendimento colocar uma pessoa no atendimento ao invés de ser robotizado"}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "sem tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Indiferente", "mr_p4": ["Outros"], "P4_other": "emails", "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "bom", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "sem precisão", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "SEM INTERESSE", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "BOM", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "SEM INTERESSE", "P12": "Entende tudo com facilidade", "P13._": "Indiferente", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "BOM", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "SEM INTERESSE", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "NAO LEMBRA DE RECEBER COMUNICADOS POR EMAIL", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "SEM INTERESSE", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Um pouco burocrático", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "Central de Relacionamento –  Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "SATISFATORIA", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "SEM INTERESSE", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "MELHORAR OS MEIOS DE COMUNICACAO."}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "TRANQUILO", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "SEM INTERESSE", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "sem interesse", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Indiferente", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Diariamente", "P9": "muitos email", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "sem interesse", "P12": "Entende tudo com facilidade", "P13._": "Insatisfeito", "P14": "excesso de mensagens e filtrar mais as mensagens aos comunicadores, por sms e email."}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Diariamente", "P9": "Razoável", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "Saúde", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Várias vezes ao dia", "P9": "nao vem muito", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "repassa ao titular", "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": "informações mais didáticas e claras possíveis, simplificar mais"}, {"P1": "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "BOA", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "PRIORIZO OUTRAS COISAS", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Aplicativo com menus exclusivos", "P8": "Algumas vezes por semana", "P9": "SUFICIENTE", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "PRESENCIAL TEM DIFICULDADE DE ACESSO E ONLINE ACESSO POUCO O EMAIL", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": "ENVIAR MENSAGENS POR WHATSAPP OU TER UM APP PROPRIO."}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "BOM", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "PRESENCIAL E DISTANTE", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Não lembra", "P3": "Indiferente", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Outros"], "P4_other": "boletos", "P5": "Indiferente", "P6": "E-mail", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "adequada", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "por morar longe, porque é de dificil acesso", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Outros"], "P4_other": "PROBLEMA, PAGAR TAXA DE HONORARIO MEDICOS, PAGAR DE FORA, GOSTARIA DE SABER SOBRE REEMBOLSO", "P5": "Insatisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "BOA", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "POR FALTA DE TEMPO", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "PODERIAM INCLUIR E DETALHAR O QUE ESTÁ INCLUIDO NO PLANO, E O QUE TEM QUE PAGAR, E EXPLICAR DE FORMA ACESSIVEL"}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "boa", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "ocupações", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": "uso mais do WhatsApp, e não só do e-mail."}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Outros"], "P4_other": "caso precise de ajuda", "P5": "Ainda não precisei realizar nenhum contato", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "pouco", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "o pai que participa", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "exagerado", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "nunca teve oportunidade", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "Acha que podia diminuir um pouco", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "nunca teve interesse", "P12": "Não sabe avaliar / não costuma acompanhar", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Não sabe avaliar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Indiferente", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "OS E-MAILS SAO ENVIADOS EM UMA QUANTIDADE BOA, ENVIAM O SUFICIENTE PARA ME MANTER INFORMADA.", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "NUNCA RECEBI CONVITE E NUNCA ME INTERESSEI", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "deveria ter mais liberalidade com a pessoa comunicadora, mais autonomia, se a titular permite autonomia para resolver as situações, porque o comunicador não tem essa autonomia"}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Aplicativo com menus exclusivos", "P8": "Algumas vezes por semana", "P9": "satisfatorio", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "nunca recebeu comunicado", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "ela não recebe comunicado, gostaria de receber todos os informativos pelo whatsapp"}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Aplicativo com menus exclusivos", "P8": "Diariamente", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "nunca precisou", "P12": "Entende tudo com facilidade", "P13._": "Indiferente", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": null, "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "NUNCA FOI CONVIDADA", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "nunca foi comunicada", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": "QUE FOSSE ENVIADAS MAIS INFORMAÇOES PELO WHATSAPP PORQUE É O QUE EU TENHO MAIS FACILIDADE"}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "satisfatorio", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "nao viu necessidade", "P12": "Entende em parte e sempre busca ajuda", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "BOA", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "NAO TEVE OPORTUNIDADE", "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "E-mail", "P8": "Algumas vezes por semana", "P9": "razoavel", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "não teve interesse", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Outros"], "P4_other": "ajuda pontual", "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "normal", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "nao teve condicoes", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "RAZOAVEL", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "NAO TEM TEMPO", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "BOAS", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "NAO TEM INTERESSE", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Indiferente", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Várias vezes ao dia", "P9": "NAO RECEBE SMS, EMAIL SATISFATORIO", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "NAO TEM INTERESSE", "P12": "Entende tudo com facilidade", "P13._": "Não sabe avaliar", "P14": "UMA ABA  OU CANAL EXCLUSIVO PARA O COMUNICADOR, MAS QUE ESTEJA NO SITE COM TOTAL SEGURANÇA, SENHA E ETC"}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": [], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "ideal", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "não tem condições de andar", "P12": "Entende em parte e sempre busca ajuda", "P13._": "Não sabe avaliar", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "SUFICIENTE", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "NAO TEM ACESSO", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "perfeito", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "nao se sentiu convidado", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde", "Outros"], "P4_other": "superavit", "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "otimo", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "não sabe quando tem ou onde tem", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Aplicativo com menus exclusivos", "P8": "Diariamente", "P9": "BOA", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "NAO PRECISOU", "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Não sabe avaliar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Indiferente", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "tranquilo", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "nao pode as lives", "P12": "Não sabe avaliar / não costuma acompanhar", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "NAO LER", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "NAO LER OS ANUNCIOS", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Várias vezes ao dia", "P9": "Coerente", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "Não lembra", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Várias vezes ao dia", "P9": "razoável", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "não interesse", "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Aplicativo com menus exclusivos", "P8": "Diariamente", "P9": "BOM", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "NAO HOUVE NECESSIDADE", "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Não lembra", "P3": "Não sabe avaliar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "SMS", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "não acompanha muito", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "nao foi convidado.", "P12": "Entende em parte e sempre busca ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "BOA", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "NAO FOI CONVIDADA", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "P2": "Não lembra", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "É bom", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "Não fica sabendo", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Não sabe avaliar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "razoável.", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "nao é conveniada", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "melhorar as respostas dos questionamentos ao convenio"}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "nao acesssa informaçõe", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "queria inserir o numero novo, seria ele 61993739074 e retirar o numero antigo com final 2020"}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "Excelente", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "N teve interesse", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "gosta muito dos emails, completos e elaborados", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "mora no interior", "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Não sabe", "P8": "Diariamente", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "Médicos preparados", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Diariamente", "P9": "Tá ok", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "Interesses", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "Ter permissão de dúvidas quanto a exames, processos e informaçoes, porque somente o titular tem acesso a algumas informaçoes que tambem deveriam ser passadas para o comunicador"}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "tranquilo", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "interesse do titular", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Não lembra", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Indiferente", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "NAO RECEBE", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "INTERESSE", "P12": "Não sabe avaliar / não costuma acompanhar", "P13._": "Indiferente", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "por email a frequencia e baixa e senhora acha que é pouco.", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "horarios e falta de tempo", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "satisfeito", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "horarios", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito insatisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "falta de tempo", "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": "chat"}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "Central de Relacionamento –  Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "falta de tempo", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "falta de tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Várias vezes ao dia", "P9": "nada de excessivo", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "falta de tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde", "Outros"], "P4_other": "fatura, boleto", "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "E-mail", "P8": "Diariamente", "P9": "razoavel", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "falta de tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "whatsapp"}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "suficiente", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "falta de tempo", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "normal", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "falta de interesse e tempo", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "INDIFERENTE", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "FALTA DE INTERESSE", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": [], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "falta de interesse", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "falta de interesse", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "importante ficar atualizado", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "falta de interesse", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "a parte de contas de quem recebe, poderia ter um campo explicando como seria a  portabilidade caso a pessoa que recebe o beneficio queira mudar de banco. ter algo mais formal explicando."}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Não lembra", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": null, "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "falta de interesse", "P12": "Não sabe avaliar / não costuma acompanhar", "P13._": "Indiferente", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "falta de interersse", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "Normal", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "Esquecimento", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "TRANQUILO", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "ESQUECE", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "boa", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "era o pai que frequentava", "P12": "Entende em parte e sempre busca ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Outros"], "P4_other": "acompanhamento e atender as necessidades", "P5": "Ainda não precisei realizar nenhum contato", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "recebe pouco.", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": "entrando agora como comunicador", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "área especifica pra comunicadores da sistel."}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Um pouco burocrático", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Insatisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "BOM", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "ELE QUEM PARTICIPA", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "e interesse do pai, ele tentou acessar e não conseguiu", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Indiferente", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Indiferente", "P6": "E-mail", "P7": "Aplicativo com menus exclusivos", "P8": "Diariamente", "P9": "Ok", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "Disponibilidade", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "Menu exclusivo no site ou no aplicativo"}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Insatisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "poucas informações", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": "cuida do pai acamado", "P12": "Entende tudo com facilidade", "P13._": "Insatisfeito", "P14": "mais informações ao assistido passados para um canal de comunicação do comunicador, não tem detalhamento das cobranças e tabelas de preços sempre atualizar aos comunicadores, 2x ao ano, atendimento humanizado."}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Algumas vezes por semana", "P9": "Bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "Correria", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "BOA", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "A DISTANCIA", "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Aplicativo com menus exclusivos", "P8": "Várias vezes ao dia", "P9": "Bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "Indiferente", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "Canal no WhatsApp"}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "Site na internet", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "muito bom.", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": "mais informações e tirar duvidas pelo whatsapp"}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "normal", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "E-mail", "P8": "Diariamente", "P9": "normal", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "E-mail", "P7": "Aplicativo com menus exclusivos", "P8": "Raramente", "P9": "Otimo", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "RAZOAVEL", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Não lembra", "P3": "Muito importante", "mr_p4": [], "P4_other": null, "P5": "Insatisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "Satisfatório", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Insatisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "Satisfatório", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "SUFICIENTE", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "SUFICIENTE", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "Tá ok", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "Tranquilo", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "Tranquilo", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": [], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "TRANQUILO", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "Fraco", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": null, "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": "Se comumicasse mais com a gente mais simples a comunicação"}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Um pouco burocrático", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "ideal", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "melhorar o site, para ser melhor para a assistida"}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Um pouco burocrático", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "Central de Relacionamento –  Via atendimento", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "pouco", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "pagina de indicação do comunicador."}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Não sabe avaliar", "mr_p4": [], "P4_other": null, "P5": "Indiferente", "P6": "Central de Relacionamento –  Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": null, "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": null, "P12": "Não sabe avaliar / não costuma acompanhar", "P13._": "Indiferente", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "ADEQUADA", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Não lembra", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "Instagram", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "Bom", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Não lembra", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Indiferente", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "LEGAL", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": null, "P12": "Não sabe avaliar / não costuma acompanhar", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Indiferente", "P6": "SMS", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "Resoavel", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "Central de Relacionamento –  Via atendimento", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "SATISFATORIA", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "E-mail", "P8": "Diariamente", "P9": "tranquilo, sem excesso", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "E-mail", "P8": "Nunca", "P9": "Tudo certo", "P10": "Nunca acessei o site da Sistel", "P11": "4", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "NORMAL", "P10": "Consigo encontrar as informações com facilidade", "P11": "4", "P11_other": "3 MESES DE COMUNICADORA", "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "Site na internet", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": "Criar canal no WhatsApp"}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Raramente", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "acha ok e importante", "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Aplicativo com menus exclusivos", "P8": "Diariamente", "P9": "adequada.", "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "bastante", "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "Boas", "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Várias vezes ao dia", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "dentro da razoabilidade", "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Outros"], "P4_other": "liga pra sistel em caso de duvidas", "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "otimo", "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "Facebook", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "satisfatório", "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "Satisfatório", "P10": "Consigo encontrar as informações com facilidade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Um pouco burocrático", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "Bom", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "Ser Maia acessível parano idoso"}, {"P1": "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "P2": "Simples", "P3": "Indiferente", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": null, "P10": "Nunca acessei o site da Sistel", "P11": "Ambos", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Não lembra", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Tem dificuldade para entender", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "E-mail", "P8": "Diariamente", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": null, "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Diariamente", "P9": "adequado", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "Central de Relacionamento –  Via atendimento", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Algumas vezes por semana", "P9": "boa", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Diariamente", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": "melhorar na interacao com os comunicadores."}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Algumas vezes por semana", "P9": "bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Um pouco burocrático", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Insatisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "BOM", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "SOBRE O DIREITO A APOSENTADORIA DO TITULAR"}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "demorado, melhor email", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "Dentro do necessário", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "Muito bom", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Indiferente", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito insatisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "normal", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "ser mais pratico para o proprio assistido, facilitar para o idoso em relacao aos aplicativos"}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "NORMAL", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Insatisfeito", "P6": "E-mail", "P7": "Outros", "P8": "Várias vezes ao dia", "P9": "ok", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Insatisfeito", "P14": "receber comunicações via carta fisicamente, receber por email da mais trabalho do que fisicamente para a assistida"}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "Padrão esperado", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Indiferente", "P6": "WhatsApp – Via atendimento", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Várias vezes ao dia", "P9": "recebo poucas mensagens", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Indiferente", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "satisfatório", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "Site na internet", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "suficiente", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Um pouco burocrático", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Outros", "P8": "Algumas vezes por semana", "P9": "Tranquilo", "P10": "Consigo encontrar as informações com facilidade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Algumas vezes por semana", "P9": "acha a quantidade ok", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "melhorar desenvolvimento do site"}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Indiferente", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Insatisfeito", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "BOA", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito insatisfeito", "P14": "DEPENDENTE DA LEITURA DO PROGRAMA."}, {"P1": "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "acha que esta bem", "P10": "Nunca acessei o site da Sistel", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "MUITO BOA", "P10": "Nunca acessei o site da Sistel", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "ENVIAR OS HOLERITES."}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": [], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "Razoável", "P10": "Nunca acessei o site da Sistel", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "Atendimento mais rápido na ligação"}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "São as necessarias, o importante, não envia nada de forma desnecessaria", "P10": "Nunca acessei o site da Sistel", "P11": "Online", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "boa", "P10": "Consigo encontrar as informações com facilidade", "P11": "Presencial", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": "prosseguir melhorando"}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "boa, sabe de tudo", "P10": "Consigo encontrar as informações com facilidade", "P11": "Presencial", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "esta normal", "P10": "Consigo encontrar as informações com facilidade", "P11": "Presencial", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "Não abre com frequência", "P10": "Consigo encontrar as informações com facilidade", "P11": "Presencial", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "Mais informativos importantes ao pacote preventivo"}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Aplicativo com menus exclusivos", "P8": "Diariamente", "P9": "necessario", "P10": "Consigo encontrar as informações com facilidade", "P11": "Presencial", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "otimo,", "P10": "Consigo encontrar as informações com facilidade", "P11": "Presencial", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "Existisse o envio dos boletos e coisas essenciais da sistel, para o WhatsApp de maneira mais simples a determinadas pessoas que não tem um comunicador ou responsável, pudessem ter uma acesso fácil dessas coisas essencia"}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Diariamente", "P9": "RAZO~ÁVL", "P10": "Consigo encontrar as informações com facilidade", "P11": "Presencial", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "tranquilo", "P10": "Consigo encontrar as informações com facilidade", "P11": "Presencial", "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "ter geriatra"}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Algumas vezes por semana", "P9": "otimo", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": "Presencial", "P11_other": null, "P12": "Entende em parte e sempre busca ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Um pouco burocrático", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Indiferente", "P6": "Central de Relacionamento –  Via atendimento", "P7": "Outros", "P8": "Algumas vezes por semana", "P9": "mandam muita coisa.", "P10": "Não encontro informações necessárias", "P11": "Presencial", "P11_other": null, "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Indiferente", "P14": "escutassem mais os comunicadores, e melhorassem a respeito do modo de escrita e informações."}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": [], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": null, "P10": "Nunca acessei o site da Sistel", "P11": "Presencial", "P11_other": null, "P12": "Não sabe avaliar / não costuma acompanhar", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "Tranquilo", "P10": "Nunca acessei o site da Sistel", "P11": "Presencial", "P11_other": null, "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "acha adequado", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "acha ok", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "WhatsApp – Via atendimento", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "acha pouco", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "E-mail", "P7": "Página exclusiva para o comunicador no site da Sistel", "P8": "Diariamente", "P9": "boa", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "boa", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "esta ok", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "esta satisfeito", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Um pouco burocrático", "P3": "Importante, mas pode melhorar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "nao e tao frequente", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Indiferente", "P14": "melhorar na parte do atendimento"}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "Não tem mensurar", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "E-mail", "P7": "E-mail", "P8": "Diariamente", "P9": "normal", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Um pouco burocrático", "P3": "Importante, mas pode melhorar", "mr_p4": [], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "razoavel", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "mais autonomia aos comunicadores"}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": [], "P4_other": null, "P5": "Satisfeito", "P6": "E-mail", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "satisfatorio", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "E-mail", "P8": "Diariamente", "P9": "satisfatorio", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "satisfeita", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "Site na internet", "P7": "Canal de transmissão no Whatsapp", "P8": "Algumas vezes por semana", "P9": "suficiente", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Muito importante", "mr_p4": [], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "E-mail", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "tranquilo", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Muito satisfeito", "P14": null}, {"P1": "Prevenção — caso ele(a) precise no futuro", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "Central de Relacionamento –  Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "tranquilo", "P10": "Consigo encontrar as informações com facilidade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "sugeriu um video simples para os idosos explicando como acessas o app"}, {"P1": "Porque ele(a) depende do meu auxílio", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Indiferente", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Raramente", "P9": "fraca", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": null, "P11_other": null, "P12": "Tem dificuldade para entender", "P13._": "Indiferente", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Indiferente", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "poderia mandar mais", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "melhorar o contato por pessoa"}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel", "Dúvidas sobre comunicados ou informativos enviados pela Sistel", "Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Todos", "P8": "Diariamente", "P9": "suficiente", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": null, "P11_other": null, "P12": "Entende em parte e às vezes precisa de ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Importante, mas pode melhorar", "mr_p4": [], "P4_other": null, "P5": "Satisfeito", "P6": "Central de Relacionamento –  Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "suficiente", "P10": "Consigo encontrar as informações, mas com dificuldade", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Um pouco burocrático", "P3": "Importante, mas pode melhorar", "mr_p4": ["Acompanhamento do assistido aos eventos da Sistel"], "P4_other": null, "P5": "Ainda não precisei realizar nenhum contato", "P6": "E-mail", "P7": "E-mail", "P8": "Várias vezes ao dia", "P9": "regular", "P10": "Não encontro informações necessárias", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Indiferente", "P14": null}, {"P1": "Sou o(a) cuidador(a) principal", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Muito satisfeito", "P6": "E-mail", "P7": "Aplicativo com menus exclusivos", "P8": "Algumas vezes por semana", "P9": "quantidade ok", "P10": "Nunca acessei o site da Sistel", "P11": null, "P11_other": null, "P12": "Entende em parte e sempre busca ajuda", "P13._": "Satisfeito", "P14": null}, {"P1": "Gosto da Sistel e acompanho mesmo sem ele(a) precisar de ajuda", "P2": "Não lembra", "P3": "Muito importante", "mr_p4": [], "P4_other": null, "P5": "Satisfeito", "P6": "Central de Relacionamento –  Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Diariamente", "P9": "satisfatorio", "P10": "Nunca acessei o site da Sistel", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": null}, {"P1": "Costumo ajudar em questões burocráticas", "P2": "Simples", "P3": "Muito importante", "mr_p4": ["Informações sobre o plano de saúde"], "P4_other": null, "P5": "Satisfeito", "P6": "WhatsApp – Via atendimento", "P7": "Canal de transmissão no Whatsapp", "P8": "Várias vezes ao dia", "P9": "sms: recebe muito emil: acha tranquilo", "P10": "Nunca acessei o site da Sistel", "P11": null, "P11_other": null, "P12": "Entende tudo com facilidade", "P13._": "Satisfeito", "P14": "melhorar a comunicacao."}];
+        const FILTERS = FILTERS_META;
+        const CHART_LABEL_MAX = 40;
+
+        // Estados globais
+        let charts = {};
+
+        // INICIALIZAÇÃO
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🌍 Dashboard SPSS Universal carregado');
+            console.log('📊 ' + VARS_META.length + ' variáveis, ' + FILTERS.length + ' filtros, ' + RECORDS.length + ' registros');
+            
+            buildFilters();
+            renderAll();
+        });
+
+        // FILTROS - USANDO f em vez de filter para evitar conflitos
+        function buildFilters() {
+            const container = document.getElementById('filtersGrid');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            if (FILTERS.length === 0) {
+                container.innerHTML = '<p style="color: #999; font-style: italic;">Nenhum filtro disponível</p>';
+                return;
+            }
+            
+            FILTERS.forEach(f => {
+                const filterGroup = document.createElement('div');
+                filterGroup.className = 'filter-group';
+                
+                const label = document.createElement('label');
+                label.className = 'filter-label';
+                label.textContent = f.title;
+                filterGroup.appendChild(label);
+                
+                const dropdownContainer = document.createElement('div');
+                dropdownContainer.className = 'custom-dropdown';
+                
+                const dropdownButton = document.createElement('div');
+                dropdownButton.className = 'dropdown-button';
+                dropdownButton.onclick = () => toggleDropdown(f.name);
+                dropdownButton.innerHTML = '<span id="' + f.name + 'Text">Todos</span><span class="arrow">▼</span>';
+                
+                const dropdownContent = document.createElement('div');
+                dropdownContent.className = 'dropdown-content';
+                dropdownContent.id = f.name + 'Content';
+                
+                const selectAllOption = document.createElement('div');
+                selectAllOption.className = 'dropdown-option select-all';
+                selectAllOption.innerHTML = '<input type="checkbox" onchange="selectAllOptions(\'' + f.name + '\')"><label>Selecionar Todos</label>';
+                dropdownContent.appendChild(selectAllOption);
+                
+                f.values.forEach(value => {
+                    const option = document.createElement('div');
+                    option.className = 'dropdown-option';
+                    option.innerHTML = '<input type="checkbox" value="' + value + '" onchange="updateDropdownText(\'' + f.name + '\')"><label>' + value + '</label>';
+                    dropdownContent.appendChild(option);
+                });
+                
+                dropdownContainer.appendChild(dropdownButton);
+                dropdownContainer.appendChild(dropdownContent);
+                filterGroup.appendChild(dropdownContainer);
+                container.appendChild(filterGroup);
+            });
+        }
+
+        function toggleDropdown(filterId) {
+            const button = event.currentTarget;
+            const content = document.getElementById(filterId + 'Content');
+            
+            document.querySelectorAll('.dropdown-content').forEach(dropdown => {
+                if (dropdown !== content) dropdown.classList.remove('show');
+            });
+            document.querySelectorAll('.dropdown-button').forEach(btn => {
+                if (btn !== button) btn.classList.remove('open');
+            });
+            
+            content.classList.toggle('show');
+            button.classList.toggle('open');
+        }
+
+        function selectAllOptions(filterId) {
+            const content = document.getElementById(filterId + 'Content');
+            const selectAllCheckbox = content.querySelector('.select-all input');
+            const checkboxes = content.querySelectorAll('.dropdown-option:not(.select-all) input');
+            
+            checkboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+            updateDropdownText(filterId);
+        }
+
+        function updateDropdownText(filterId) {
+            const content = document.getElementById(filterId + 'Content');
+            const textElement = document.getElementById(filterId + 'Text');
+            const checkboxes = content.querySelectorAll('.dropdown-option:not(.select-all) input');
+            const checkedBoxes = content.querySelectorAll('.dropdown-option:not(.select-all) input:checked');
+            
+            if (checkedBoxes.length === 0) {
+                textElement.textContent = 'Todos';
+            } else if (checkedBoxes.length === 1) {
+                textElement.textContent = checkedBoxes[0].nextElementSibling.textContent;
+            } else if (checkedBoxes.length === checkboxes.length) {
+                textElement.textContent = 'Todos';
+            } else {
+                textElement.textContent = checkedBoxes.length + ' selecionados';
+            }
+        }
+
+        function getSelectedFilters() {
+            const selectedFilters = {};
+            FILTERS.forEach(f => {
+                const content = document.getElementById(f.name + 'Content');
+                if (content) {
+                    const checkedBoxes = content.querySelectorAll('.dropdown-option:not(.select-all) input:checked');
+                    selectedFilters[f.name] = Array.from(checkedBoxes).map(cb => cb.value);
+                }
+            });
+            return selectedFilters;
+        }
+
+        function applyFilters() {
+            document.querySelectorAll('.dropdown-content').forEach(d => d.classList.remove('show'));
+            document.querySelectorAll('.dropdown-button').forEach(b => b.classList.remove('open'));
+            renderAll();
+        }
+
+        function clearFilters() {
+            document.querySelectorAll('.dropdown-content input[type="checkbox"]').forEach(cb => cb.checked = false);
+            FILTERS.forEach(f => {
+                const textElement = document.getElementById(f.name + 'Text');
+                if (textElement) textElement.textContent = 'Todos';
+            });
+            document.querySelectorAll('.dropdown-content').forEach(d => d.classList.remove('show'));
+            document.querySelectorAll('.dropdown-button').forEach(b => b.classList.remove('open'));
+            renderAll();
+        }
+
+        function getFilteredRecords() {
+            const selectedFilters = getSelectedFilters();
+            return RECORDS.filter(record => {
+                return Object.keys(selectedFilters).every(filterName => {
+                    const filterValues = selectedFilters[filterName];
+                    if (filterValues.length === 0) return true;
+                    const recordValue = record[filterName];
+                    if (recordValue === null || recordValue === undefined) return false;
+                    return filterValues.includes(String(recordValue));
+                });
+            });
+        }
+
+        // RENDERIZAÇÃO
+        function renderAll() {
+            const filteredRecords = getFilteredRecords();
+            const content = document.getElementById('content');
+            content.innerHTML = '';
+            
+            console.log('🔄 Renderizando com ' + filteredRecords.length + ' registros filtrados');
+            console.log('📋 Ordem das variáveis sendo processadas:', VARS_META.map(v => v.name));
+            
+            VARS_META.forEach((varMeta, index) => {
+                const section = createSection(varMeta, filteredRecords);
+                content.appendChild(section);
+            });
+        }
+
+
+        function renderStringVariable(varMeta, records) {
+            const container = document.createElement('div');
+
+            // Normaliza texto: tira espaços, ignora '99' e aplica capitalização simples
+            function normalizeText(text) {
+                if (text === null || text === undefined) return '';
+                let t = String(text).trim();
+                if (!t || t === '99') return '';
+                return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+            }
+
+            // Coleta e normaliza as respostas
+            let validResponses = records
+                .map(r => normalizeText(r[varMeta.name]))
+                .filter(v => v !== '');
+
+            if (validResponses.length === 0) {
+                container.innerHTML = '<p style="color: #999; font-style: italic;">Nenhuma resposta encontrada</p>';
+                return container;
+            }
+
+            // ✅ DEBUG: Verificar ordem das respostas
+            console.log(`📝 ${varMeta.name}: Respostas de texto encontradas:`, validResponses.slice(0, 5));
+
+            // ✅ REGRA CORRETA: Textual = Ordem alfabética
+            validResponses.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+            // --------- BLOCO VISUAL (lista normal como antes) ----------
+            const summary = document.createElement('p');
+            summary.innerHTML = '<strong>Total de respostas:</strong> ' + validResponses.length;
+            summary.style.marginBottom = '15px';
+
+            const responseList = document.createElement('div');
+            responseList.style.cssText =
+                'max-height: 400px; overflow-y: auto; border: 1px solid var(--border); ' +
+                'border-radius: var(--radius); background: #f8f9fa;';
+
+            validResponses.forEach((response, index) => {
+                const responseItem = document.createElement('div');
+                responseItem.style.cssText =
+                    'padding: 12px 16px; border-bottom: 1px solid var(--border); ' +
+                    'background: white; margin-bottom: 1px; font-size: 13px;';
+                responseItem.innerHTML =
+                    '<strong>' + (index + 1) + '.</strong> ' + String(response);
+                responseList.appendChild(responseItem);
+            });
+
+            container.appendChild(summary);
+            container.appendChild(responseList);
+
+            // --------- TABELA OCULTA PARA EXPORTAÇÃO (USADA PELO EXCEL) ----------
+            const exportTable = document.createElement('table');
+            exportTable.className = 'export-text-table';
+            exportTable.style.display = 'none'; // invisível para o usuário
+
+            const thead = document.createElement('thead');
+            const headRow = document.createElement('tr');
+            ['Nº', 'Resposta'].forEach(h => {
+                const th = document.createElement('th');
+                th.innerText = h;
+                headRow.appendChild(th);
+            });
+            thead.appendChild(headRow);
+
+            const tbody = document.createElement('tbody');
+            validResponses.forEach((resp, idx) => {
+                const tr = document.createElement('tr');
+
+                const tdIndex = document.createElement('td');
+                tdIndex.innerText = (idx + 1).toString();
+                tr.appendChild(tdIndex);
+
+                const tdResp = document.createElement('td');
+                tdResp.innerText = resp;
+                tr.appendChild(tdResp);
+
+                tbody.appendChild(tr);
+            });
+
+            exportTable.appendChild(thead);
+            exportTable.appendChild(tbody);
+
+            // adiciona a tabela escondida ao container
+            container.appendChild(exportTable);
+
+            return container;
+        }
+
+        function renderNumericScaleVariable(varMeta, records) {
+            const container = document.createElement('div');
+
+            const values = records
+                .map(r => r[varMeta.name])
+                .filter(v => v !== null && v !== undefined && !isNaN(v));
+
+            if (values.length === 0) {
+                container.innerHTML = '<p style="color: #999; font-style: italic;">Nenhum valor numérico válido encontrado</p>';
+                return container;
+            }
+
+            const stats = varMeta.stats || {};
+            const summary = document.createElement('p');
+            let statsText = '<strong>Estatísticas</strong>: ';
+
+            if (stats && typeof stats === 'object') {
+                const parts = [];
+                if (stats.n !== undefined)      parts.push(`N = ${stats.n}`);
+                if (stats.mean !== undefined)   parts.push(`Média = ${stats.mean.toFixed(2)}`);
+                if (stats.median !== undefined) parts.push(`Mediana = ${stats.median.toFixed(2)}`);
+                if (stats.stddev !== undefined) parts.push(`DP = ${stats.stddev.toFixed(2)}`);
+                if (stats.min !== undefined)    parts.push(`Mín = ${stats.min.toFixed(2)}`);
+                if (stats.max !== undefined)    parts.push(`Máx = ${stats.max.toFixed(2)}`);
+                statsText += parts.join(' | ');
+            } else {
+                statsText += 'não disponível';
+            }
+
+            summary.innerHTML = statsText;
+            summary.style.marginBottom = '15px';
+
+            const chartContainer = document.createElement('div');
+            chartContainer.className = 'chart-container';
+
+            const canvas = document.createElement('canvas');
+            chartContainer.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+
+            const minVal = Math.min(...values);
+            const maxVal = Math.max(...values);
+            const binCount = 10;
+            const range = maxVal - minVal || 1;
+            const binSize = range / binCount;
+
+            const bins = new Array(binCount).fill(0);
+            const labels = [];
+
+            for (let i = 0; i < binCount; i++) {
+                const start = minVal + i * binSize;
+                const end = (i === binCount - 1) ? maxVal : (start + binSize);
+                labels.push(`${start.toFixed(1)} – ${end.toFixed(1)}`);
+            }
+
+            values.forEach(v => {
+                let idx = Math.floor((v - minVal) / binSize);
+                if (idx < 0) idx = 0;
+                if (idx >= binCount) idx = binCount - 1;
+                bins[idx]++;
+            });
+
+            const totalCases = values.length;
+            const percentages = bins.map(count => totalCases > 0 ? (count / totalCases * 100) : 0);
+            
+            // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
+            const maxPercentage = Math.max(...percentages);
+            const yAxisMax = maxPercentage > 0 ? Math.min(100, Math.ceil(maxPercentage * 1.1)) : 100;
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: percentages,
+                        backgroundColor: 'rgba(74, 144, 226, 0.7)',
+                        borderColor: 'rgba(74, 144, 226, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const index = context.dataIndex;
+                                    const count = bins[index];
+                                    const pct = context.parsed.y;
+                                    return `${pct.toFixed(1)}% (${count} casos)`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: yAxisMax,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            container.appendChild(summary);
+            container.appendChild(chartContainer);
+
+            return container;
+        }
+
+        function renderDateVariable(varMeta, records) {
+            const container = document.createElement('div');
+
+            const freq = {};
+            let validCount = 0;
+
+            records.forEach(r => {
+                const v = r[varMeta.name];
+                if (v !== null && v !== undefined && String(v).trim() !== '') {
+                    validCount++;
+                    const key = String(v);
+                    freq[key] = (freq[key] || 0) + 1;
+                }
+            });
+
+            const entries = Object.entries(freq);
+            if (entries.length === 0) {
+                container.innerHTML = '<p style="color: #999; font-style: italic;">Nenhuma data válida encontrada</p>';
+                return container;
+            }
+
+            // ✅ REGRA CORRETA: Datas ordenadas cronologicamente
+            entries.sort((a, b) => new Date(a[0]) - new Date(b[0]));
+
+            const labels = entries.map(([d]) => d);
+            const counts = entries.map(([, c]) => c);
+            const percentages = counts.map(count => validCount > 0 ? (count / validCount * 100) : 0);
+            
+            // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
+            const maxPercentage = Math.max(...percentages);
+            const yAxisMax = maxPercentage > 0 ? Math.min(100, Math.ceil(maxPercentage * 1.1)) : 100;
+
+            const chartContainer = document.createElement('div');
+            chartContainer.className = 'chart-container';
+            const canvas = document.createElement('canvas');
+            chartContainer.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: percentages,
+                        backgroundColor: 'rgba(76, 175, 80, 0.7)',
+                        borderColor: 'rgba(76, 175, 80, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const index = context.dataIndex;
+                                    const qty = counts[index];
+                                    const pct = context.parsed.y;
+                                    return `${pct.toFixed(1)}% (${qty} casos)`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: yAxisMax,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 0
+                            }
+                        }
+                    }
+                }
+            });
+
+            const summary = document.createElement('p');
+            summary.innerHTML = '<strong>Resumo:</strong> ' +
+                entries.length + ' datas distintas';
+            summary.style.marginTop = '15px';
+
+            container.appendChild(chartContainer);
+            container.appendChild(summary);
+
+            return container;
+        }
+
+        function renderCategoricalVariable(varMeta, records) {
+            const container = document.createElement('div');
+            const freq = {};
+            let validCount = 0;
+
+            // Conta frequências
+            records.forEach(r => {
+                let v = r[varMeta.name];
+                
+                if (Array.isArray(v)) {
+                    // MR
+                    v.forEach(item => {
+                        if (item !== null && item !== undefined && String(item).trim() !== '') {
+                            const key = String(item).trim();
+                            freq[key] = (freq[key] || 0) + 1;
+                            validCount++;
+                        }
+                    });
+                } else {
+                    // Categórica simples
+                    if (v !== null && v !== undefined && String(v).trim() !== '') {
+                        const key = String(v).trim();
+                        freq[key] = (freq[key] || 0) + 1;
+                        validCount++;
+                    }
+                }
+            });
+
+            const entries = Object.entries(freq);
+            if (entries.length === 0) {
+                container.innerHTML = '<p style="color:#999;font-style:italic;">Nenhum dado disponível</p>';
+                return container;
+            }
+
+            // ✅ DEBUG: Verificar ordem das categorias
+            console.log(`📊 ${varMeta.name}: Categorias encontradas:`, entries.map(([label]) => label));
+
+            // ✅ REGRAS CORRETAS DE ORDENAÇÃO baseadas no tipo da variável
+            const varType = varMeta.var_type || varMeta.type || 'single';
+            const measure = varMeta.measure || 'nominal';
+            
+            if (varType === 'multiple_response' || varMeta.type === 'mr') {
+                // 🔗 MR NOMINAL: Da maior frequência para a menor
+                entries.sort((a, b) => b[1] - a[1]);
+                console.log(`🔗 ${varMeta.name}: MR ordenado por frequência (maior→menor)`);
+                
+            } else if (measure === 'ordinal') {
+                console.log(`📈 Ordenando categorias pela ordem SPSS (ordinal)`);
+
+                // Recuperar ordem SPSS vinda do Python
+                const valueOrder = VARS_VALUE_ORDER[varMeta.name] || [];
+
+                // Ordenar conforme a ordem real dos códigos SPSS
+                entries.sort((a, b) => {
+                    const codeA = isNaN(a[0]) ? a[0] : Number(a[0]);
+                    const codeB = isNaN(b[0]) ? b[0] : Number(b[0]);
+
+                    const ia = valueOrder.indexOf(codeA);
+                    const ib = valueOrder.indexOf(codeB);
+
+                    return ia - ib;
+                });
+                
+            } else {
+                // 📊 SINGLE NOMINAL: Da maior frequência para a menor
+                entries.sort((a, b) => b[1] - a[1]);
+                console.log(`📊 ${varMeta.name}: Nominal ordenado por frequência (maior→menor)`);
+            }
+
+            const labels = entries.map(([label]) => label);
+            const counts = entries.map(([,count]) => count);
+            const percentages = counts.map(count => validCount > 0 ? (count / validCount * 100) : 0);
+            
+            // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
+            const maxPercentage = Math.max(...percentages);
+            const yAxisMax = maxPercentage > 0 ? Math.min(100, Math.ceil(maxPercentage * 1.1)) : 100;
+
+            // ----- Gráfico -----
+            const chartContainer = document.createElement('div');
+            chartContainer.className = 'chart-container';
+            
+            const canvas = document.createElement('canvas');
+            chartContainer.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: percentages,
+                        backgroundColor: 'rgba(74, 144, 226, 0.7)',
+                        borderColor: 'rgba(74, 144, 226, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const index = context.dataIndex;
+                                    const qty = counts[index];
+                                    const pct = context.parsed.y;
+                                    return `${pct.toFixed(1)}% (${qty} casos)`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: yAxisMax,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // ----- Tabela -----
+            const table = document.createElement('table');
+            table.className = 'table-categorical';
+
+            const header = document.createElement('tr');
+            header.innerHTML = '<th>Categoria</th><th>Frequência</th><th>%</th>';
+            table.appendChild(header);
+
+            entries.forEach(([label, count]) => {
+                const pct = validCount > 0 ? (count / validCount * 100).toFixed(1) : '0.0';
+                const row = document.createElement('tr');
+                row.innerHTML = `<td>${label}</td><td>${count}</td><td>${pct}%</td>`;
+                table.appendChild(row);
+            });
+
+            // Linha de total
+            const totalRow = document.createElement('tr');
+            totalRow.style.fontWeight = 'bold';
+            totalRow.style.borderTop = '2px solid #ddd';
+            totalRow.style.backgroundColor = '#f8f9fa';
+            const totalCount = entries.reduce((sum, [, count]) => sum + count, 0);
+            totalRow.innerHTML = `<td>Total</td><td>${totalCount}</td><td>100.0%</td>`;
+            table.appendChild(totalRow);
+
+            container.appendChild(chartContainer);
+            
+            // const summary = document.createElement('p');
+            // summary.textContent = validCount + ' respostas válidas';
+            // summary.style.marginTop = '15px';
+            // container.appendChild(summary);
+            container.appendChild(table);
+
+            return container;
+        }
+
+        function createSection(varMeta, records) {
+            const section = document.createElement('div');
+            section.className = 'section';
+            
+            const header = document.createElement('div');
+            header.className = 'section-header';
+            
+            const title = document.createElement('h2');
+            title.className = 'section-title';
+            
+            const varType = varMeta.var_type || varMeta.type || "single";
+            const measure = varMeta.measure || null;
+            
+            let icon = '';
+            if (varType === 'string') {
+                icon = '📝';
+            } else if (varType === 'multiple_response' || varMeta.type === 'mr') {
+                icon = '☑️';
+            } else if (varType === 'date') {
+                icon = '📅';
+            } else if (varType === 'numeric' && measure === 'scale') {
+                icon = '📈';
+            } else {
+                icon = '📊';
+            }
+            
+            title.innerHTML = icon + ' ' + varMeta.title;
+            
+            const subtitle = document.createElement('div');
+            subtitle.className = 'section-subtitle';
+            subtitle.textContent = varMeta.spss_type || '';
+            
+            header.appendChild(title);
+            header.appendChild(subtitle);
+            
+            const content = document.createElement('div');
+            content.className = 'section-content';
+            
+            // Escolha do renderizador
+            if (varType === 'string') {
+                content.appendChild(renderStringVariable(varMeta, records));
+            } else if (varType === 'multiple_response' || varMeta.type === 'mr') {
+                content.appendChild(renderCategoricalVariable(varMeta, records));
+            } else if (varType === 'date') {
+                content.appendChild(renderDateVariable(varMeta, records));
+            } else if (varType === 'numeric' && measure === 'scale') {
+                content.appendChild(renderNumericScaleVariable(varMeta, records));
+            } else {
+                // numeric nominal/ordinal ou qualquer categórico
+                content.appendChild(renderCategoricalVariable(varMeta, records));
+            }
+            section.appendChild(header);
+            section.appendChild(content);            
+            return section;
+        }
+
+
+        // Eventos globais
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('.custom-dropdown')) {
+                document.querySelectorAll('.dropdown-content').forEach(d => d.classList.remove('show'));
+                document.querySelectorAll('.dropdown-button').forEach(b => b.classList.remove('open'));
+            }
+        });
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                document.querySelectorAll('.dropdown-content').forEach(d => d.classList.remove('show'));
+                document.querySelectorAll('.dropdown-button').forEach(b => b.classList.remove('open'));
+            }
+        });
+
+        function exportAllTables() {
+            const sections = document.querySelectorAll('.section');
+            if (!sections.length) {
+                alert("Nenhuma tabela encontrada.");
+                return;
+            }
+
+            const wb = XLSX.utils.book_new();
+
+            sections.forEach(section => {
+                const titleEl = section.querySelector('.section-title');
+                const table = section.querySelector('table');
+
+                if (!table) return;
+
+                const title = titleEl ? titleEl.innerText.trim() : "Variável";
+
+                // Extrair linhas
+                const rows = [];
+                table.querySelectorAll('tr').forEach(tr => {
+                    const row = [];
+                    tr.querySelectorAll('th, td').forEach(cell => {
+                        row.push(cell.innerText.trim());
+                    });
+                    rows.push(row);
+                });
+
+                // Criar aba
+                const ws = XLSX.utils.aoa_to_sheet([
+                    [title],
+                    [""],
+                    ...rows
+                ]);
+
+                // Remove caracteres proibidos pelo Excel
+                let safeName = title.replace(/[:\\/\?\*\[\]]/g, "");
+
+                // Remove múltiplos espaços
+                safeName = safeName.replace(/\s+/g, ' ').trim();
+
+                // Corta para 31 caracteres (limite do Excel)
+                const sheetName = safeName.substring(0, 31) || "Aba";
+                XLSX.utils.book_append_sheet(wb, ws, sheetName);
+            });
+
+            const fileName = "tabelas_exportadas.xlsx";
+            XLSX.writeFile(wb, fileName);
+        }
+        
+    </script>
+</body>
+</html>
