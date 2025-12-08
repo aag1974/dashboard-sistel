@@ -541,6 +541,7 @@ class DashboardManagerOverlay:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {{
             --primary: #4A90E2;
@@ -615,8 +616,8 @@ class DashboardManagerOverlay:
         }}
 
         .client-logo {{
-            width: 120px;
-            height: 80px;
+            width: 160px;
+            height: 100px;
             object-fit: contain;
             transition: all 0.3s ease;
             border-radius: 0;
@@ -626,8 +627,8 @@ class DashboardManagerOverlay:
         }}
 
         .sidebar.collapsed .client-logo {{
-            width: 45px;
-            height: 35px;
+            width: 55px;
+            height: 45px;
         }}
 
         .logo-placeholder {{
@@ -649,29 +650,37 @@ class DashboardManagerOverlay:
             font-size: 20px;
         }}
 
-        .sidebar-toggle {{
+        .sidebar-toggle-container {{
             position: absolute;
-            top: 20px;
-            right: -12px;
-            width: 24px;
-            height: 24px;
-            background: var(--primary);
-            border: none;
-            border-radius: 50%;
-            color: white;
-            cursor: pointer;
+            bottom: 12px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }}
+
+        .sidebar-toggle-btn {{
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--primary);
+            border: 1px solid var(--primary);
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: var(--shadow);
+            cursor: pointer;
             transition: all 0.3s ease;
-            z-index: 1001;
-            font-size: 12px;
+            font-size: 18px;
         }}
 
-        .sidebar-toggle:hover {{
-            background: var(--primary-dark);
-            transform: scale(1.1);
+        .sidebar-toggle-btn:hover {{
+            background: var(--primary);
+            color: white;
+        }}
+
+        .sidebar.collapsed .sidebar-toggle-btn i {{
+            transform: rotate(180deg);
         }}
 
         .sidebar-menu {{
@@ -909,13 +918,6 @@ class DashboardManagerOverlay:
                 left: -280px;
             }}
 
-            .sidebar-toggle {{
-                position: fixed;
-                top: 15px;
-                left: 15px;
-                z-index: 3000;
-            }}
-
             .main-content {{
                 margin-left: 0;
             }}
@@ -946,11 +948,15 @@ class DashboardManagerOverlay:
                 </div>
             </div>
 
-            <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">⟵</button>
-
             <nav class="sidebar-menu" id="sidebarMenu">
                 <!-- Menu será gerado dinamicamente -->
             </nav>
+
+            <div class="sidebar-toggle-container">
+                <button id="sidebarToggle" class="sidebar-toggle-btn" onclick="toggleSidebar()">
+                    <i id="sidebarToggleIcon" class="fa fa-chevron-left"></i>
+                </button>
+            </div>
         </div>
 
         <div class="mobile-overlay" id="mobileOverlay" onclick="closeMobileSidebar()"></div>
@@ -1038,7 +1044,7 @@ class DashboardManagerOverlay:
 
         function toggleSidebar() {{
             const sidebar = document.getElementById('sidebar');
-            const toggleBtn = document.getElementById('sidebarToggle');
+            const icon = document.getElementById("sidebarToggleIcon");
             
             if (isMobile) {{
                 sidebar.classList.toggle('mobile-open');
@@ -1046,11 +1052,13 @@ class DashboardManagerOverlay:
             }} else {{
                 if (currentSidebarState === 'expanded') {{
                     sidebar.classList.add('collapsed');
-                    toggleBtn.innerHTML = '⟶';
+                    icon.classList.remove('fa-chevron-left');
+                    icon.classList.add('fa-chevron-right');
                     currentSidebarState = 'collapsed';
                 }} else {{
                     sidebar.classList.remove('collapsed');
-                    toggleBtn.innerHTML = '⟵';
+                    icon.classList.remove('fa-chevron-right');
+                    icon.classList.add('fa-chevron-left');
                     currentSidebarState = 'expanded';
                 }}
             }}

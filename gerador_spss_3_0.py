@@ -1904,11 +1904,38 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
             const totalCases = values.length;
             const percentages = bins.map(count => totalCases > 0 ? (count / totalCases * 100) : 0);
+            
+            // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
+            const maxPercentage = Math.max(...percentages);
+            const yAxisMax = maxPercentage > 0
+                ? Math.min(100, Math.ceil(maxPercentage / 10) * 10)
+                : 100;
 
             new Chart(ctx, {{
                 type: 'bar',
                 data: {{
-                    labels: labels,
+                    labels: labels.map(function(label) {{
+                        const maxLen = 20;  // ajuste fino aqui
+                        const words = label.split(" ");
+                        const lines = [];
+                        let current = "";
+
+                        words.forEach(word => {{
+                            if ((current + " " + word).trim().length > maxLen) {{
+                                lines.push(current.trim());
+                                current = word;
+                            }} else {{
+                                current += " " + word;
+                            }}
+                        }});
+
+                        if (current.trim().length > 0) {{
+                            lines.push(current.trim());
+                        }}
+
+                        return lines;
+                    }}),
+
                     datasets: [{{
                         data: percentages,
                         backgroundColor: 'rgba(74, 144, 226, 0.7)',
@@ -1935,7 +1962,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     scales: {{
                         y: {{
                             beginAtZero: true,
-                            max: 100,
+                            max: yAxisMax,
                             ticks: {{
                                 callback: function(value) {{
                                     return value + '%';
@@ -1979,6 +2006,10 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             const labels = entries.map(([d]) => d);
             const counts = entries.map(([, c]) => c);
             const percentages = counts.map(count => validCount > 0 ? (count / validCount * 100) : 0);
+            
+            // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
+            const maxPercentage = Math.max(...percentages);
+            const yAxisMax = maxPercentage > 0 ? Math.min(100, Math.ceil(maxPercentage * 1.1)) : 100;
 
             const chartContainer = document.createElement('div');
             chartContainer.className = 'chart-container';
@@ -2016,7 +2047,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     scales: {{
                         y: {{
                             beginAtZero: true,
-                            max: 100,
+                            max: yAxisMax,
                             ticks: {{
                                 callback: function(value) {{
                                     return value + '%';
@@ -2116,6 +2147,10 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             const labels = entries.map(([label]) => label);
             const counts = entries.map(([,count]) => count);
             const percentages = counts.map(count => validCount > 0 ? (count / validCount * 100) : 0);
+            
+            // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
+            const maxPercentage = Math.max(...percentages);
+            const yAxisMax = maxPercentage > 0 ? Math.min(100, Math.ceil(maxPercentage * 1.1)) : 100;
 
             // ----- Gráfico -----
             const chartContainer = document.createElement('div');
@@ -2155,7 +2190,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     scales: {{
                         y: {{
                             beginAtZero: true,
-                            max: 100,
+                            max: yAxisMax,
                             ticks: {{
                                 callback: function(value) {{
                                     return value + '%';

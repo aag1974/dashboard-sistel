@@ -24,7 +24,7 @@ except ImportError:
     sys.exit(1)
 
 # Constantes
-CHART_LABEL_MAX = 40
+CHART_LABEL_MAX = 15
 
 # ========== FUNÇÕES DE UTILIDADE ==========
 
@@ -1589,6 +1589,34 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         const RECORDS = {records_json};
         const FILTERS = FILTERS_META;
         const CHART_LABEL_MAX = {CHART_LABEL_MAX};
+    // Função para quebrar rótulos longos em múltiplas linhas
+    function wrapLabel(label, maxLen) {{
+        if (label === null || label === undefined) return [''];
+        const raw = String(label).trim();
+        if (raw.length <= maxLen) return [raw];
+
+        const words = raw.split(' ');
+        const lines = [];
+        let current = '';
+
+        words.forEach(word => {{
+            const tentative = (current + ' ' + word).trim();
+            if (tentative.length > maxLen) {{
+                if (current.trim().length > 0) {{
+                    lines.push(current.trim());
+                }}
+                current = word;
+            }} else {{
+                current = tentative;
+            }}
+        }});
+
+        if (current.trim().length > 0) {{
+            lines.push(current.trim());
+        }}
+        return lines;
+    }}
+
 
         // Estados globais
         let charts = {{}};
@@ -1905,14 +1933,16 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             const totalCases = values.length;
             const percentages = bins.map(count => totalCases > 0 ? (count / totalCases * 100) : 0);
             
-            // ✅ CORREÇÃO: Eixo Y ajustado ao valor máximo + margem
+            // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
             const maxPercentage = Math.max(...percentages);
-            const yAxisMax = maxPercentage > 0 ? Math.min(100, Math.ceil(maxPercentage * 1.1)) : 100;
+            const yAxisMax = maxPercentage > 0
+                ? Math.min(100, Math.ceil(maxPercentage / 10) * 10)
+                : 100;
 
             new Chart(ctx, {{
                 type: 'bar',
                 data: {{
-                    labels: labels,
+                    labels: labels.map(label => wrapLabel(label, CHART_LABEL_MAX)),
                     datasets: [{{
                         data: percentages,
                         backgroundColor: 'rgba(74, 144, 226, 0.7)',
@@ -1947,7 +1977,6 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                             }}
                         }}
                     }}
-                }}
                 }}
             }});
 
@@ -1985,9 +2014,11 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             const counts = entries.map(([, c]) => c);
             const percentages = counts.map(count => validCount > 0 ? (count / validCount * 100) : 0);
             
-            // ✅ CORREÇÃO: Eixo Y ajustado ao valor máximo + margem
+            // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
             const maxPercentage = Math.max(...percentages);
-            const yAxisMax = maxPercentage > 0 ? Math.min(100, Math.ceil(maxPercentage * 1.1)) : 100;
+            const yAxisMax = maxPercentage > 0
+                ? Math.min(100, Math.ceil(maxPercentage / 10) * 10)
+                : 100;
 
             const chartContainer = document.createElement('div');
             chartContainer.className = 'chart-container';
@@ -1998,7 +2029,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             new Chart(ctx, {{
                 type: 'bar',
                 data: {{
-                    labels: labels,
+                    labels: labels.map(label => wrapLabel(label, CHART_LABEL_MAX)),
                     datasets: [{{
                         data: percentages,
                         backgroundColor: 'rgba(76, 175, 80, 0.7)',
@@ -2126,9 +2157,11 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             const counts = entries.map(([,count]) => count);
             const percentages = counts.map(count => validCount > 0 ? (count / validCount * 100) : 0);
             
-            // ✅ CORREÇÃO: Eixo Y ajustado ao valor máximo + margem
+            // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
             const maxPercentage = Math.max(...percentages);
-            const yAxisMax = maxPercentage > 0 ? Math.min(100, Math.ceil(maxPercentage * 1.1)) : 100;
+            const yAxisMax = maxPercentage > 0
+                ? Math.min(100, Math.ceil(maxPercentage / 10) * 10)
+                : 100;
 
             // ----- Gráfico -----
             const chartContainer = document.createElement('div');
@@ -2141,7 +2174,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             new Chart(ctx, {{
                 type: 'bar',
                 data: {{
-                    labels: labels,
+                    labels: labels.map(label => wrapLabel(label, CHART_LABEL_MAX)),
                     datasets: [{{
                         data: percentages,
                         backgroundColor: 'rgba(74, 144, 226, 0.7)',
