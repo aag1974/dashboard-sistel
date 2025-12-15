@@ -4,6 +4,7 @@
 # ========== IMPORTS E CONSTANTES ==========
 
 import os, sys, json, re, pandas as pd
+import unicodedata
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -97,6 +98,69 @@ def fix_labels_in_meta(meta):
     except Exception:
         pass
 
+def safe_value_label_lookup(valabs_dict, var_name, value):
+    """
+    Lookup robusto para value labels que tenta diferentes tipos de chave.
+    Resolve problema de 1.0 vs 1, "1" vs 1, etc.
+    """
+    var_valabs = valabs_dict.get(var_name, {})
+    if not var_valabs:
+        return value
+    
+    # Tentar valor original primeiro
+    if value in var_valabs:
+        result = var_valabs[value]
+        return result.strip() if isinstance(result, str) else result
+    
+    # Se valor é numérico, tentar variações
+    if isinstance(value, (int, float)):
+        # Tentar como int se é float inteiro
+        if isinstance(value, float) and value.is_integer():
+            int_val = int(value)
+            if int_val in var_valabs:
+                result = var_valabs[int_val]
+                return result.strip() if isinstance(result, str) else result
+        
+        # Tentar como float se é int
+        if isinstance(value, int):
+            float_val = float(value)
+            if float_val in var_valabs:
+                result = var_valabs[float_val]
+                return result.strip() if isinstance(result, str) else result
+        
+        # Tentar como string
+        str_val = str(value)
+        if str_val in var_valabs:
+            result = var_valabs[str_val]
+            return result.strip() if isinstance(result, str) else result
+        
+        # Tentar string sem .0
+        if str_val.endswith('.0'):
+            clean_str = str_val[:-2]
+            if clean_str in var_valabs:
+                result = var_valabs[clean_str]
+                return result.strip() if isinstance(result, str) else result
+    
+    # Se valor é string, tentar como número
+    if isinstance(value, str):
+        try:
+            # Tentar int
+            int_val = int(float(value))
+            if int_val in var_valabs:
+                result = var_valabs[int_val]
+                return result.strip() if isinstance(result, str) else result
+            
+            # Tentar float  
+            float_val = float(value)
+            if float_val in var_valabs:
+                result = var_valabs[float_val]
+                return result.strip() if isinstance(result, str) else result
+        except (ValueError, TypeError):
+            pass
+    
+    # Se nada funcionou, retornar valor original
+    return value
+
 def get_value_labels_map(meta) -> Dict[str, Dict[Any, str]]:
     vvl = getattr(meta, "variable_value_labels", None)
     if isinstance(vvl, dict) and vvl:
@@ -168,6 +232,91 @@ def format_text_response(text: str):
     if not text or text == "99":
         return None
     return text
+
+# === PROCESSAMENTO DE PALAVRAS‑CHAVE PARA VARIÁVEIS DE TEXTO ===
+
+# Conjunto básico de stopwords em português para filtrar termos pouco informativos.  Esta lista
+# pode ser expandida conforme necessário.  Ela evita que artigos, preposições e pronomes se
+# tornem palavras‑chave.
+STOPWORDS_PT = {
+    'a','o','e','é','de','do','da','para','por','em','que','na','no','nao','não','os','as','das','dos',
+    'um','uma','uns','umas','com','sem','mais','menos','sobre','ou','ao','até','como','pela','pelas',
+    'pelo','pelos','se','sua','suas','seu','seus','são','foi','ser','há','tem','têm','será','serão','faz',
+    'fazer','vocês','nos','nós','eu','tu','você','ele','ela','eles','elas','também','onde','quando','nosso',
+    'nossa','nossos','nossas','este','esta','esse','essa','aquele','aquela','isto','isso','aquilo','lhe','lhe',
+}
+
+def _normalize_token_pt(token: str) -> str:
+    """
+    Normaliza um token para a extração de palavras‑chave:
+    - Converte para minúsculas
+    - Remove acentos (unicode)
+    - Remove caracteres não alfabéticos
+    """
+    # Converter para minúsculo
+    token = token.lower()
+    # Remover acentuação
+    token = ''.join(c for c in unicodedata.normalize('NFKD', token) if not unicodedata.combining(c))
+    # Manter apenas letras
+    token = re.sub(r'[^a-z]+', '', token)
+    return token
+
+def extract_keywords_from_texts(texts, max_keywords: int = 20, min_freq: int = 2):
+    """
+    Recebe uma lista de respostas em texto e retorna as palavras‑chave mais frequentes.
+
+    Esta função normaliza palavras (minúsculas, sem acentos e caracteres não alfabéticos),
+    remove stopwords e agrupa diferentes flexões em uma mesma raiz simples. A raiz é
+    definida como os primeiros 6 caracteres da palavra normalizada, o que ajuda a
+    unificar termos como "informacao", "informacoes" e "informativo" na mesma categoria.
+
+    Parâmetros:
+        texts (List[str]): lista de respostas em texto.
+        max_keywords (int): número máximo de palavras‑chave a retornar.
+        min_freq (int): frequência mínima para considerar uma palavra.
+
+    Retorna:
+        List[Dict[str, Any]]: lista de dicionários com chaves 'word' (representante da raiz)
+        e 'count' (frequência dessa raiz).
+    """
+    from collections import Counter
+    root_counter = Counter()
+    representative = {}
+    for text in texts:
+        if not isinstance(text, str):
+            continue
+        # Substituir pontuação por espaços para separar tokens
+        clean = re.sub(r'[^A-Za-zÀ-ÿ\s]', ' ', text)
+        seen_roots_in_response = set()
+        for token in clean.split():
+            norm = _normalize_token_pt(token)
+            if not norm:
+                continue
+            # Ignorar tokens muito curtos e stopwords
+            if len(norm) <= 2 or norm in STOPWORDS_PT:
+                continue
+            # Definir raiz como os primeiros 6 caracteres (ou a palavra inteira se menor)
+            root = norm[:6]
+            # Adicionar ao conjunto para contar apenas uma vez por resposta
+            seen_roots_in_response.add(root)
+            # Guardar um representante legível para essa raiz (primeiro encontrado ou
+            # lexicograficamente menor).  O representante ajuda a exibir a palavra
+            # numa forma compreensível para o usuário.
+            if root not in representative or representative[root] > norm:
+                representative[root] = norm
+        # Após processar todos os tokens da resposta, incremente contadores uma vez por root
+        for root in seen_roots_in_response:
+            root_counter[root] += 1
+    # Filtrar raízes por frequência mínima
+    frequent_roots = [(root, cnt) for root, cnt in root_counter.items() if cnt >= min_freq]
+    # Ordenar por frequência descrescente e, em caso de empate, pela palavra representante
+    frequent_roots.sort(key=lambda x: (-x[1], representative[x[0]]))
+    # Limitar ao número máximo de palavras‑chave
+    keywords = []
+    for root, cnt in frequent_roots[:max_keywords]:
+        rep_word = representative[root]
+        keywords.append({'word': rep_word, 'count': cnt, 'root': root})
+    return keywords
 
 # ========== FUNÇÕES AUXILIARES PARA EVITAR ERRO hashable ==========
 
@@ -761,37 +910,6 @@ def detect_physical_type(meta, df, var_name: str) -> str:
     # ---------- 5) Caso nada acima → é numérica ----------
     return "numeric"
 
-def calculate_numeric_stats(df, var_name: str):
-    """
-    Calcula estatísticas básicas para variáveis numéricas de escala.
-    """
-    try:
-        values = df[var_name].dropna()
-        if len(values) == 0:
-            return None
-        
-        # Converter para numérico se não for
-        values = pd.to_numeric(values, errors='coerce').dropna()
-        if len(values) == 0:
-            return None
-            
-        stats = {
-            'count': int(len(values)),
-            'mean': float(values.mean()),
-            'median': float(values.median()),
-            'std': float(values.std()) if len(values) > 1 else 0.0,
-            'min': float(values.min()),
-            'max': float(values.max()),
-            'q25': float(values.quantile(0.25)),
-            'q75': float(values.quantile(0.75))
-        }
-        
-        return stats
-        
-    except Exception as e:
-        print(f"⚠️ Erro ao calcular estatísticas para {var_name}: {e}")
-        return None
-
 def detect_measure_type(meta, var_name: str, physical_type: str):
     """
     Retorna nominal / ordinal / scale
@@ -824,7 +942,7 @@ def detect_variables_universal(selected_vars, meta, valabs, df):
     vars_meta = []
     processed_vars = set()  # Rastrear variáveis já processadas
     
-    # PASSO 1: Detectar grupos MR (mas não processar ainda)
+    # PASSO 1: Detectar grupos MR (usando apenas variáveis selecionadas para análise)
     mr_groups, standalone_vars = detect_mr_groups_improved(selected_vars, meta, df)
     
     print(f"\n📊 Grupos MR detectados: {list(mr_groups.keys())}")
@@ -915,8 +1033,7 @@ def detect_variables_universal(selected_vars, meta, valabs, df):
                 measure = detect_measure_type(meta, var, physical)
 
                 if measure == "scale":
-                    # Numérica contínua (Escala)
-                    stats = calculate_numeric_stats(df, var)
+                    # Numérica contínua (Escala) - stats serão calculadas depois com ponderação
                     vars_meta.append({
                         "name": var,
                         "title": get_var_label(meta, var),
@@ -926,7 +1043,7 @@ def detect_variables_universal(selected_vars, meta, valabs, df):
                         "var_type": "numeric",
                         "measure": "scale",
                         "mr_subtype": None,
-                        "stats": stats
+                        "stats": None  # Será calculado depois com ponderação
                     })
                     print(f"      ✅ Adicionado como Numérica (Escala) seguindo SPSS")
                 else:
@@ -974,18 +1091,73 @@ def detect_variables_universal(selected_vars, meta, valabs, df):
 
 
 def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List[str], 
-                          file_source: str, client_name: str):
+                          file_source: str, client_name: str, weight_var: str = None):
     """
     Constrói:
       - created_at: timestamp
       - vars_meta: metadados das variáveis (incluindo grupos MR e stats)
       - filters_meta: metadados dos filtros
       - records: lista de dicionários prontos para o dashboard
+      
+    NOVO: Inclui automaticamente campos de data (submitdate, etc.) para cálculo de período de coleta
     """
     created_at = datetime.now().strftime("%d/%m/%Y %H:%M")
     
+    # === DETECTAR E INCLUIR CAMPOS DE DATA AUTOMATICAMENTE ===
+    date_fields = []
+    for col in df.columns:
+        col_lower = col.lower()
+        if (col_lower == 'submitdate' or 
+            'submit' in col_lower or 
+            ('date' in col_lower and col_lower not in ['updatedate', 'update_date']) or
+            ('data' in col_lower and 'update' not in col_lower)):
+            
+            # Verificar se é realmente uma data
+            try:
+                sample_values = df[col].dropna().head(10)
+                if len(sample_values) > 0:
+                    for val in sample_values:
+                        test_date = pd.to_datetime(val, errors='coerce')
+                        if pd.notna(test_date) and test_date.year > 1900:
+                            date_fields.append(col)
+                            print(f"📅 Campo de data detectado: {col}")
+                            break
+            except:
+                continue
+    
+    # Combinar variáveis selecionadas com campos de data (removendo duplicatas)
+    all_vars_for_records = list(selected_vars)
+    for date_field in date_fields:
+        if date_field not in all_vars_for_records:
+            all_vars_for_records.append(date_field)
+            print(f"✅ Incluído automaticamente para período de coleta: {date_field}")
+    
     # Mapa de value labels por variável
     valabs = get_value_labels_map(meta)
+
+    # ----- PROCESSAMENTO DE VARIÁVEL PESO -----
+    weight_values = None
+    if weight_var and weight_var in df.columns:
+        try:
+            weight_series = pd.to_numeric(df[weight_var], errors='coerce')
+            # Substituir missing/NaN por 1.0 (peso neutro)
+            weight_values = weight_series.fillna(1.0)
+            # Validar pesos (devem ser positivos)
+            weight_values = weight_values.abs()
+            weight_values = weight_values.replace(0, 1.0)  # Zero vira 1
+            print(f"⚖️ Usando variável peso: {weight_var}")
+            print(f"   📊 Estatísticas do peso: Média={weight_values.mean():.3f}, Min={weight_values.min():.3f}, Max={weight_values.max():.3f}")
+        except Exception as e:
+            print(f"⚠️ Erro ao processar peso {weight_var}: {e}. Prosseguindo sem ponderação.")
+            weight_values = None
+    elif weight_var:
+        print(f"⚠️ Variável peso '{weight_var}' não encontrada. Prosseguindo sem ponderação.")
+        
+    # Função helper para aplicar pesos
+    def apply_weight(base_value, index):
+        if weight_values is not None and index < len(weight_values):
+            return base_value * weight_values.iloc[index]
+        return base_value
 
     # ----- ORDEM ORIGINAL DAS CATEGORIAS (labels já normalizados) -----
     def _normalize_label_for_js(lbl):
@@ -1000,6 +1172,21 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
         ordered_labels = [_normalize_label_for_js(lbl) for lbl in labels_dict.values()]
         value_orders[var_name] = ordered_labels
     
+    # Criar mapeamento código -> label para exibição  
+    code_to_label = {}
+    for var_name, labels_dict in valabs.items():
+        if labels_dict:
+            # CORREÇÃO: converter chaves numéricas para strings
+            string_mapping = {}
+            for k, v in labels_dict.items():
+                # Converter 0.0 → "0", 1.0 → "1", etc.
+                if isinstance(k, (int, float)) and k == int(k):
+                    key_str = str(int(k))
+                else:
+                    key_str = str(k)
+                string_mapping[key_str] = str(_normalize_label_for_js(v))
+            code_to_label[var_name] = string_mapping
+    
     # Metadados das variáveis e grupos de múltipla resposta (FASE 1)
     vars_meta, mr_groups = detect_variables_universal(selected_vars, meta, valabs, df)
     
@@ -1008,10 +1195,23 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
     for fv in filter_vars:
         if fv in df.columns:
             unique_vals = []
+            print(f"🔍 DEBUG FILTRO {fv}:")
+            
+            # Debug: mostrar estrutura do valabs para esta variável
+            var_valabs = valabs.get(fv, {})
+            if var_valabs:
+                print(f"   📋 Valabs keys: {list(var_valabs.keys())} (types: {[type(k).__name__ for k in var_valabs.keys()]})")
+                print(f"   📋 Valabs values: {list(var_valabs.values())}")
+            else:
+                print(f"   ⚠️ Nenhum value_labels encontrado para {fv}")
+            
             for val in df[fv].dropna().unique():
-                processed_val = str(valabs.get(fv, {}).get(val, val)).replace(":", "").strip()
+                # Usar lookup robusto para pegar o label correto
+                label = safe_value_label_lookup(valabs, fv, val)
+                processed_val = str(label).replace(":", "").strip()
                 processed_val = _normalize_display_value(processed_val)
                 unique_vals.append(processed_val)
+                print(f"   {val} ({type(val).__name__}) → '{label}' → '{processed_val}'")
             
             if unique_vals:
                 filters_meta.append({
@@ -1019,6 +1219,9 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
                     "title": get_var_label(meta, fv) or fv,
                     "values": safe_sorted_unique(unique_vals)
                 })
+                print(f"✅ Filtro {fv}: {len(unique_vals)} valores únicos")
+                print(f"   Final values: {unique_vals}")
+            print()
     
     # ---------- HELPERS ESPECÍFICOS DA FASE 3 ----------
     def format_spss_date(v):
@@ -1030,7 +1233,7 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
         except Exception:
             return None
 
-    def add_scale_value(scale_store, var_name, value):
+    def add_scale_value(scale_store, var_name, value, weight=1.0):
         """Acumula valores de variáveis scale para cálculo posterior de stats."""
         if value is None:
             return
@@ -1040,31 +1243,86 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
             return
         if var_name not in scale_store:
             scale_store[var_name] = []
-        scale_store[var_name].append(f)
+        # Armazenar como tupla (valor, peso) para estatísticas ponderadas
+        scale_store[var_name].append((f, weight))
 
     def compute_stats(values):
-        """Calcula média, mediana, desvio padrão, min, max, n."""
+        """Calcula média, mediana, desvio padrão, min, max, n com suporte a ponderação."""
         import math
         if not values:
             return None
-        vals = list(values)
-        n = len(vals)
-        vals_sorted = sorted(vals)
-        mean = sum(vals) / n
-        if n % 2 == 1:
-            median = vals_sorted[n // 2]
-        else:
-            median = (vals_sorted[n // 2 - 1] + vals_sorted[n // 2]) / 2
-        var = sum((x - mean) ** 2 for x in vals) / n
-        stddev = math.sqrt(var)
-        return {
-            "n": n,
-            "mean": mean,
-            "median": median,
-            "stddev": stddev,
-            "min": min(vals),
-            "max": max(vals)
-        }
+        
+        # DEBUG: Verificar tipo dos dados recebidos
+        try:
+            # Verificar se são tuplas (valor, peso) ou valores simples
+            if values and isinstance(values[0], tuple):
+                # Valores ponderados
+                weighted_values = values
+                total_weight = sum(weight for _, weight in weighted_values)
+                
+                if total_weight == 0:
+                    return None
+                    
+                # Média ponderada
+                weighted_sum = sum(value * weight for value, weight in weighted_values)
+                mean = weighted_sum / total_weight
+                
+                # Para mediana, criar lista expandida pelos pesos (aproximação)
+                expanded_values = []
+                for value, weight in weighted_values:
+                    # Adicionar valor repetido proporcionalmente ao peso
+                    count = max(1, int(round(weight)))
+                    expanded_values.extend([value] * count)
+                
+                expanded_values.sort()
+                n_expanded = len(expanded_values)
+                if n_expanded % 2 == 1:
+                    median = expanded_values[n_expanded // 2]
+                else:
+                    median = (expanded_values[n_expanded // 2 - 1] + expanded_values[n_expanded // 2]) / 2
+                
+                # Desvio padrão ponderado
+                var = sum(weight * (value - mean) ** 2 for value, weight in weighted_values) / total_weight
+                stddev = math.sqrt(var)
+                
+                # Min/Max dos valores originais
+                raw_values = [value for value, _ in weighted_values]
+                
+                return {
+                    "n": int(round(total_weight)),  # Total ponderado
+                    "mean": mean,
+                    "median": median,
+                    "stddev": stddev,
+                    "min": min(raw_values),
+                    "max": max(raw_values)
+                }
+            else:
+                # Valores simples (comportamento original)
+                vals = list(values)
+                n = len(vals)
+                vals_sorted = sorted(vals)
+                mean = sum(vals) / n
+                if n % 2 == 1:
+                    median = vals_sorted[n // 2]
+                else:
+                    median = (vals_sorted[n // 2 - 1] + vals_sorted[n // 2]) / 2
+                var = sum((x - mean) ** 2 for x in vals) / n
+                stddev = math.sqrt(var)
+                
+                return {
+                    "n": n,
+                    "mean": mean,
+                    "median": median,
+                    "stddev": stddev,
+                    "min": min(vals),
+                    "max": max(vals)
+                }
+        except Exception as e:
+            print(f"⚠️ Erro em compute_stats: {e}")
+            print(f"   Tipo de values: {type(values)}")
+            if values:
+                print(f"   Primeiro elemento: {type(values[0])} = {values[0]}")
+            return None
     
     # Mapeia quais variáveis são scale numéricas
     scale_vars = {
@@ -1072,23 +1330,37 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
         for vm in vars_meta
         if vm.get("var_type") == "numeric" and vm.get("measure") == "scale"
     }
-    scale_values_store: Dict[str, List[float]] = {name: [] for name in scale_vars.keys()}
+    scale_values_store: Dict[str, List[Tuple[float, float]]] = {name: [] for name in scale_vars.keys()}
     
     # ---------- PROCESSAMENTO DE REGISTROS ----------
     records = []
-    for _, row in df.iterrows():
+    for index, row in df.iterrows():
         rec: Dict[str, Any] = {}
         
+        # Adicionar peso do registro (1.0 se não há ponderação)
+        current_weight = apply_weight(1.0, index)
+        rec["__weight__"] = current_weight  # Campo especial para ponderação
+        
         # ----- Filtros -----
+        filter_debug = {}
         for fv in filter_vars:
             if fv in df.columns:
                 val = row.get(fv)
                 if pd.isna(val):
                     rec[fv] = None
+                    filter_debug[fv] = f"NULL"
                 else:
-                    rec[fv] = _normalize_display_value(
-                        str(valabs.get(fv, {}).get(val, val)).replace(":", "").strip()
+                    # Usar lookup robusto para pegar o label correto
+                    label = safe_value_label_lookup(valabs, fv, val)
+                    processed_val = _normalize_display_value(
+                        str(label).replace(":", "").strip()
                     )
+                    rec[fv] = processed_val
+                    filter_debug[fv] = f"{val}→{label}→{processed_val}"
+        
+        # Debug para primeiros registros
+        if index < 3:
+            print(f"📋 Record {index}: {filter_debug}")
         
         # ----- Variáveis -----
         for vm in vars_meta:
@@ -1167,8 +1439,15 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
             
             # Categórico (nominal / ordinal)
             if measure in ("nominal", "ordinal"):
-                processed_val = str(valabs.get(base_col, {}).get(val, val)).replace(":", "").strip()
-                processed_val = _normalize_display_value(processed_val)
+                if measure == "ordinal":
+                    # Para ordinais: manter o CÓDIGO original para ordenação correta
+                    processed_val = str(val).replace(":", "").strip()
+                    processed_val = _normalize_display_value(processed_val)
+                else:
+                    # Para nominais: usar o LABEL (comportamento original)
+                    label = safe_value_label_lookup(valabs, base_col, val)
+                    processed_val = str(label).replace(":", "").strip()
+                    processed_val = _normalize_display_value(processed_val)
                 rec[vname] = processed_val
                 continue
             
@@ -1177,13 +1456,32 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
                 try:
                     num_val = float(val)
                     rec[vname] = num_val
-                    add_scale_value(scale_values_store, vname, num_val)
+                    add_scale_value(scale_values_store, vname, num_val, current_weight)
                 except Exception:
                     rec[vname] = None
                 continue
             
             # Fallback genérico
             rec[vname] = _normalize_display_value(str(val))
+        
+        # === PROCESSAR CAMPOS DE DATA ADICIONAIS ===
+        for date_field in date_fields:
+            if date_field not in rec:  # Só adicionar se não foi processado ainda
+                val = row.get(date_field)
+                if pd.isna(val):
+                    rec[date_field] = None
+                else:
+                    # Tentar converter para timestamp JavaScript (formato ISO)
+                    try:
+                        date_obj = pd.to_datetime(val)
+                        if pd.notna(date_obj):
+                            # Converter para string ISO para JavaScript
+                            rec[date_field] = date_obj.isoformat()
+                        else:
+                            rec[date_field] = None
+                    except:
+                        # Se não conseguir converter, manter string original
+                        rec[date_field] = str(val) if val is not None else None
         
         records.append(rec)
     
@@ -1193,20 +1491,38 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
             name = vm["name"]
             values = scale_values_store.get(name, [])
             vm["stats"] = compute_stats(values) if values else None
+
+    # ---------- EXTRAÇÃO DE PALAVRAS‑CHAVE PARA VARIÁVEIS STRING ----------
+    # Para cada variável de texto, coletar todas as respostas válidas e gerar palavras‑chave frequentes.
+    try:
+        for vm in vars_meta:
+            if vm.get("var_type") == "string":
+                vname = vm["name"]
+                # Coletar respostas válidas (não nulas)
+                texts = [rec.get(vname) for rec in records if rec.get(vname)]
+                if texts:
+                    keywords = extract_keywords_from_texts(texts)
+                    vm["keywords"] = keywords  # lista de {'word': ..., 'count': ...}
+                else:
+                    vm["keywords"] = []
+    except Exception as e:
+        # Em caso de erro, não interromper o fluxo; apenas registrar no console.
+        print(f"⚠️ Erro ao extrair palavras‑chave: {e}")
     
-    return created_at, vars_meta, filters_meta, records, value_orders
+    return created_at, vars_meta, filters_meta, records, value_orders, code_to_label
 
 # ========== GERAÇÃO DE HTML ==========
 
 def render_html_with_working_filters(file_source: str, created_at: str, client_name: str,
                                     vars_meta: List[dict], filters_meta: List[dict], 
-                                    records: List[dict], value_orders: dict) -> str:
+                                    records: List[dict], value_orders: dict, code_to_label: dict) -> str:
 
     # JSON strings seguros para JavaScript
     vars_meta_json = json.dumps(vars_meta, ensure_ascii=False)
     filters_meta_json = json.dumps(filters_meta, ensure_ascii=False)
     records_json = json.dumps(records, ensure_ascii=False)
     value_orders_js = json.dumps(value_orders, ensure_ascii=False)
+    code_to_label_js = json.dumps(code_to_label, ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1216,10 +1532,20 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
     <title>Dashboard SPSS Universal</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <script>
     // Ordem original das categorias vinda do SPSS
     const VARS_VALUE_ORDER = {value_orders_js};
+    // Mapeamento código -> label para exibição
+    const CODE_TO_LABEL = {code_to_label_js};
+    
+    // Função para formatação brasileira (vírgula decimal)
+    function formatBR(number, decimals = 2) {{
+        if (number === null || number === undefined || isNaN(number)) return 'N/A';
+        return number.toFixed(decimals).replace('.', ',');
+    }}
     </script>
 
     <style>
@@ -1570,7 +1896,8 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             <div class="filter-actions">
                 <button class="filter-btn apply-btn" onclick="applyFilters()">✓ Aplicar</button>
                 <button class="filter-btn clear-btn" onclick="clearFilters()">🔄 Limpar</button>
-                <button class="filter-btn export-btn" onclick="exportAllTables()">⬇️ Exportar</button>
+                <button class="filter-btn export-btn" onclick="exportAllTables()">📊 Excel</button>
+                <button class="filter-btn export-btn" onclick="exportToPDF()">📄 PDF</button>
             </div>
         </div>
         <div class="filters-grid" id="filtersGrid">
@@ -1760,7 +2087,12 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     if (filterValues.length === 0) return true;
                     const recordValue = record[filterName];
                     if (recordValue === null || recordValue === undefined) return false;
-                    return filterValues.includes(String(recordValue));
+                    
+                    // Normalizar valores para comparação
+                    const normalizedRecordValue = String(recordValue).trim();
+                    const normalizedFilterValues = filterValues.map(v => String(v).trim());
+                    
+                    return normalizedFilterValues.includes(normalizedRecordValue);
                 }});
             }});
         }}
@@ -1828,9 +2160,6 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 responseList.appendChild(responseItem);
             }});
 
-            container.appendChild(summary);
-            container.appendChild(responseList);
-
             // --------- TABELA OCULTA PARA EXPORTAÇÃO (USADA PELO EXCEL) ----------
             const exportTable = document.createElement('table');
             exportTable.className = 'export-text-table';
@@ -1863,8 +2192,73 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             exportTable.appendChild(thead);
             exportTable.appendChild(tbody);
 
+            // Conteúdo principal: adiciona sumário e lista de respostas
+            container.appendChild(summary);
+
+            // --------- PALAVRAS‑CHAVE E FILTRO ---------
+            const keywords = varMeta.keywords || [];
+            if (keywords && keywords.length > 0) {{
+                const filterContainer = document.createElement('div');
+                filterContainer.style.cssText = 'margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;';
+                const filterTitle = document.createElement('span');
+                filterTitle.style.fontSize = '13px';
+                filterTitle.style.fontWeight = '600';
+                filterTitle.textContent = 'Palavras‑chave:';
+                filterContainer.appendChild(filterTitle);
+
+                // Função auxiliar para normalizar texto para comparação: converte para minúsculas
+                // e remove acentos.  Isso garante que "informacoes" corresponda a "informação".
+                function normalizeForComparison(str) {{
+                    if (!str) return '';
+                    return String(str).toLowerCase()
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '');
+                }}
+
+                // Função para aplicar filtro nas respostas.
+                // Normaliza tanto o termo pesquisado quanto o texto de cada resposta para
+                // garantir correspondência sem acentuação.
+                function applyKeywordFilter(kw) {{
+                    const normKw = kw ? normalizeForComparison(kw) : null;
+                    const items = responseList.children;
+                    for (let i = 0; i < items.length; i++) {{
+                        const item = items[i];
+                        const text = item.textContent || '';
+                        const normText = normalizeForComparison(text);
+                        if (!normKw || normText.includes(normKw)) {{
+                            item.style.display = '';
+                        }} else {{
+                            item.style.display = 'none';
+                        }}
+                    }}
+                }}
+
+                keywords.forEach(k => {{
+                    const kwBtn = document.createElement('span');
+                    kwBtn.style.cssText = 'padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 12px; background: #f1f1f1;';
+                    kwBtn.textContent = k.word + ' (' + k.count + ')';
+                    // Define tooltip sem usar aspas internas para evitar erros de sintaxe
+                    kwBtn.title = "Filtrar por " + k.word;
+                    // Armazena a raiz normalizada como dataset para o botão
+                    kwBtn.dataset.root = k.root;
+                    kwBtn.onclick = () => applyKeywordFilter(k.root);
+                    filterContainer.appendChild(kwBtn);
+                }});
+                // Botão para limpar filtro.  Usa a mesma paleta do botão "Limpar" do header e inclui ícone.
+                const clearBtn = document.createElement('span');
+                clearBtn.style.cssText = 'padding: 4px 8px; border: 1px solid #b6e0fe; border-radius: 4px; cursor: pointer; font-size: 12px; background: #e9f7fe; color: #0d6efd; display: inline-flex; align-items: center; gap: 4px;';
+                clearBtn.innerHTML = '🔄 <span>Limpar filtros</span>';
+                clearBtn.title = "Remover filtro de palavra‑chave";
+                clearBtn.onclick = () => applyKeywordFilter(null);
+                filterContainer.appendChild(clearBtn);
+                container.appendChild(filterContainer);
+            }}
+
+            container.appendChild(responseList);
+
             // adiciona a tabela escondida ao container
             container.appendChild(exportTable);
+
 
             return container;
         }}
@@ -1872,11 +2266,17 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         function renderNumericScaleVariable(varMeta, records) {{
             const container = document.createElement('div');
 
-            const values = records
-                .map(r => r[varMeta.name])
-                .filter(v => v !== null && v !== undefined && !isNaN(v));
+            // Coletar valores com seus pesos para histograma ponderado
+            const weightedValues = [];
+            records.forEach(r => {{
+                const value = r[varMeta.name];
+                const weight = r.__weight__ || 1.0;
+                if (value !== null && value !== undefined && !isNaN(value)) {{
+                    weightedValues.push({{value: Number(value), weight: weight}});
+                }}
+            }});
 
-            if (values.length === 0) {{
+            if (weightedValues.length === 0) {{
                 container.innerHTML = '<p style="color: #999; font-style: italic;">Nenhum valor numérico válido encontrado</p>';
                 return container;
             }}
@@ -1887,12 +2287,12 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
             if (stats && typeof stats === 'object') {{
                 const parts = [];
-                if (stats.n !== undefined)      parts.push(`N = ${{stats.n}}`);
-                if (stats.mean !== undefined)   parts.push(`Média = ${{stats.mean.toFixed(2)}}`);
-                if (stats.median !== undefined) parts.push(`Mediana = ${{stats.median.toFixed(2)}}`);
-                if (stats.stddev !== undefined) parts.push(`DP = ${{stats.stddev.toFixed(2)}}`);
-                if (stats.min !== undefined)    parts.push(`Mín = ${{stats.min.toFixed(2)}}`);
-                if (stats.max !== undefined)    parts.push(`Máx = ${{stats.max.toFixed(2)}}`);
+                if (stats.n !== undefined)      parts.push(`N = ${{Math.round(stats.n)}}`);
+                if (stats.mean !== undefined)   parts.push(`Média = ${{formatBR(stats.mean)}}`);
+                if (stats.median !== undefined) parts.push(`Mediana = ${{formatBR(stats.median)}}`);
+                if (stats.stddev !== undefined) parts.push(`DP = ${{formatBR(stats.stddev)}}`);
+                if (stats.min !== undefined)    parts.push(`Mín = ${{formatBR(stats.min)}}`);
+                if (stats.max !== undefined)    parts.push(`Máx = ${{formatBR(stats.max)}}`);
                 statsText += parts.join(' | ');
             }} else {{
                 statsText += 'não disponível';
@@ -1908,6 +2308,8 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             chartContainer.appendChild(canvas);
             const ctx = canvas.getContext('2d');
 
+            // Extrair apenas os valores para calcular min/max
+            const values = weightedValues.map(wv => wv.value);
             const minVal = Math.min(...values);
             const maxVal = Math.max(...values);
             const binCount = 10;
@@ -1920,17 +2322,18 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             for (let i = 0; i < binCount; i++) {{
                 const start = minVal + i * binSize;
                 const end = (i === binCount - 1) ? maxVal : (start + binSize);
-                labels.push(`${{start.toFixed(1)}} – ${{end.toFixed(1)}}`);
+                labels.push(`${{formatBR(start, 1)}} – ${{formatBR(end, 1)}}`);
             }}
 
-            values.forEach(v => {{
-                let idx = Math.floor((v - minVal) / binSize);
+            // Distribuir valores ponderados nos bins
+            weightedValues.forEach(wv => {{
+                let idx = Math.floor((wv.value - minVal) / binSize);
                 if (idx < 0) idx = 0;
                 if (idx >= binCount) idx = binCount - 1;
-                bins[idx]++;
+                bins[idx] += wv.weight;  // Usar peso em vez de 1
             }});
 
-            const totalCases = values.length;
+            const totalCases = weightedValues.reduce((sum, wv) => sum + wv.weight, 0);
             const percentages = bins.map(count => totalCases > 0 ? (count / totalCases * 100) : 0);
             
             // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
@@ -1959,9 +2362,9 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                             callbacks: {{
                                 label: function(context) {{
                                     const index = context.dataIndex;
-                                    const count = bins[index];
+                                    const count = Math.round(bins[index]);  // Arredondar para inteiro
                                     const pct = context.parsed.y;
-                                    return `${{pct.toFixed(1)}}% (${{count}} casos)`;
+                                    return `${{formatBR(pct, 1)}}% (${{count}} casos)`;
                                 }}
                             }}
                         }}
@@ -1975,6 +2378,11 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                                     return value + '%';
                                 }}
                             }}
+                        }},
+                        x: {{
+                            // Para histograma: barras sem espaço entre elas
+                            categoryPercentage: 1.0,
+                            barPercentage: 1.0
                         }}
                     }}
                 }}
@@ -1994,10 +2402,11 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
             records.forEach(r => {{
                 const v = r[varMeta.name];
+                const weight = r.__weight__ || 1.0;  // Peso do registro
                 if (v !== null && v !== undefined && String(v).trim() !== '') {{
-                    validCount++;
+                    validCount += weight;
                     const key = String(v);
-                    freq[key] = (freq[key] || 0) + 1;
+                    freq[key] = (freq[key] || 0) + weight;
                 }}
             }});
 
@@ -2046,9 +2455,9 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                             callbacks: {{
                                 label: function(context) {{
                                     const index = context.dataIndex;
-                                    const qty = counts[index];
+                                    const qty = Math.round(counts[index]);  // Arredondar para inteiro
                                     const pct = context.parsed.y;
-                                    return `${{pct.toFixed(1)}}% (${{qty}} casos)`;
+                                    return `${{formatBR(pct, 1)}}% (${{qty}} casos)`;
                                 }}
                             }}
                         }}
@@ -2092,22 +2501,23 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             // Conta frequências
             records.forEach(r => {{
                 let v = r[varMeta.name];
+                const weight = r.__weight__ || 1.0;  // Peso do registro
                 
                 if (Array.isArray(v)) {{
                     // MR
                     v.forEach(item => {{
                         if (item !== null && item !== undefined && String(item).trim() !== '') {{
                             const key = String(item).trim();
-                            freq[key] = (freq[key] || 0) + 1;
-                            validCount++;
+                            freq[key] = (freq[key] || 0) + weight;
+                            validCount += weight;
                         }}
                     }});
                 }} else {{
                     // Categórica simples
                     if (v !== null && v !== undefined && String(v).trim() !== '') {{
                         const key = String(v).trim();
-                        freq[key] = (freq[key] || 0) + 1;
-                        validCount++;
+                        freq[key] = (freq[key] || 0) + weight;
+                        validCount += weight;
                     }}
                 }}
             }});
@@ -2153,7 +2563,15 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 console.log(`📊 ${{varMeta.name}}: Nominal ordenado por frequência (maior→menor)`);
             }}
 
-            const labels = entries.map(([label]) => label);
+            // Aplicar labels descritivos APÓS ordenação
+            const labels = entries.map(([label]) => {{
+                if (CODE_TO_LABEL[varMeta.name] && CODE_TO_LABEL[varMeta.name][label]) {{
+                    const descLabel = CODE_TO_LABEL[varMeta.name][label];
+                    console.log(`✅ ${{varMeta.name}}: "${{label}}" → "${{descLabel}}"`);
+                    return descLabel;
+                }}
+                return label;
+            }});
             const counts = entries.map(([,count]) => count);
             const percentages = counts.map(count => validCount > 0 ? (count / validCount * 100) : 0);
             
@@ -2191,9 +2609,9 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                             callbacks: {{
                                 label: function(context) {{
                                     const index = context.dataIndex;
-                                    const qty = counts[index];
+                                    const qty = Math.round(counts[index]);  // Arredondar para inteiro
                                     const pct = context.parsed.y;
-                                    return `${{pct.toFixed(1)}}% (${{qty}} casos)`;
+                                    return `${{formatBR(pct, 1)}}% (${{qty}} casos)`;
                                 }}
                             }}
                         }}
@@ -2221,9 +2639,16 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             table.appendChild(header);
 
             entries.forEach(([label, count]) => {{
-                const pct = validCount > 0 ? (count / validCount * 100).toFixed(1) : '0.0';
+                const pct = validCount > 0 ? formatBR(count / validCount * 100, 1) : '0,0';
+                
+                // Usar label descritivo se disponível
+                let displayLabel = label;
+                if (CODE_TO_LABEL[varMeta.name] && CODE_TO_LABEL[varMeta.name][label]) {{
+                    displayLabel = CODE_TO_LABEL[varMeta.name][label];
+                }}
+                
                 const row = document.createElement('tr');
-                row.innerHTML = `<td>${{label}}</td><td>${{count}}</td><td>${{pct}}%</td>`;
+                row.innerHTML = `<td>${{displayLabel}}</td><td>${{Math.round(count)}}</td><td>${{pct}}%</td>`;
                 table.appendChild(row);
             }});
 
@@ -2232,8 +2657,8 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             totalRow.style.fontWeight = 'bold';
             totalRow.style.borderTop = '2px solid #ddd';
             totalRow.style.backgroundColor = '#f8f9fa';
-            const totalCount = entries.reduce((sum, [, count]) => sum + count, 0);
-            totalRow.innerHTML = `<td>Total</td><td>${{totalCount}}</td><td>100.0%</td>`;
+            const totalCount = Math.round(entries.reduce((sum, [, count]) => sum + count, 0));
+            totalRow.innerHTML = `<td>Total</td><td>${{totalCount}}</td><td>100,0%</td>`;
             table.appendChild(totalRow);
 
             container.appendChild(chartContainer);
@@ -2367,6 +2792,308 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             const fileName = "tabelas_exportadas.xlsx";
             XLSX.writeFile(wb, fileName);
         }}
+
+        // ===== FUNÇÕES DE EXPORTAÇÃO PDF =====
+        
+        function formatNumberBR(num) {{
+            // Formatação brasileira: 1.234 (ponto para milhares)
+            return num.toLocaleString('pt-BR');
+        }}
+
+        function getActiveFiltersDescription() {{
+            const selectedFilters = getSelectedFilters();
+            const activeFilters = [];
+            
+            Object.keys(selectedFilters).forEach(filterName => {{
+                const filterValues = selectedFilters[filterName];
+                if (filterValues.length > 0) {{
+                    const filterMeta = FILTERS.find(f => f.name === filterName);
+                    const filterTitle = filterMeta ? filterMeta.title : filterName;
+                    
+                    if (filterValues.length === 1) {{
+                        activeFilters.push(`${{filterTitle}}: ${{filterValues[0]}}`);
+                    }} else {{
+                        activeFilters.push(`${{filterTitle}}: ${{filterValues.length}} selecionados`);
+                    }}
+                }}
+            }});
+            
+            return activeFilters.length > 0 ? activeFilters : ['Nenhum filtro aplicado'];
+        }}
+
+        function createPDFHeader() {{
+            const now = new Date();
+            const dateStr = now.toLocaleString('pt-BR', {{
+                day: '2-digit',
+                month: '2-digit', 
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }});
+            
+            // Extrair informações dos dados globais
+            const totalRecords = RECORDS.length;
+            const totalVars = VARS_META.length;
+            const activeFilters = getActiveFiltersDescription();
+            
+            const header = document.createElement('div');
+            header.style.cssText = `
+                background: white;
+                padding: 20px;
+                border-bottom: 3px solid #4A90E2;
+                margin-bottom: 20px;
+                font-family: Arial, sans-serif;
+                page-break-after: always;
+            `;
+            
+            header.innerHTML = `
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <h1 style="color: #4A90E2; font-size: 24px; margin: 0;">📋 DASHBOARD DE ANÁLISE - PESQUISA SPSS</h1>
+                    <div style="border: 2px solid #4A90E2; margin: 10px 0;"></div>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: 16px;">
+                    <div>
+                        <p style="margin: 5px 0;"><strong>📂 Arquivo:</strong> {file_source}</p>
+                        <p style="margin: 5px 0;"><strong>📅 Gerado em:</strong> ${{dateStr}}</p>
+                    </div>
+                    <div>
+                        <p style="margin: 5px 0;"><strong>👥 Respondentes:</strong> ${{formatNumberBR(totalRecords)}}</p>
+                        <p style="margin: 5px 0;"><strong>📊 Variáveis analisadas:</strong> ${{formatNumberBR(totalVars)}}</p>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 15px;">
+                    <p style="margin: 5px 0; font-weight: bold;">🔍 Filtros aplicados:</p>
+                    ${{activeFilters.map(filter => `<p style="margin: 2px 0 2px 20px;">• ${{filter}}</p>`).join('')}}
+                </div>
+                
+                <div style="border: 2px solid #4A90E2; margin: 20px 0 10px 0;"></div>
+            `;
+            
+            return header;
+        }}
+
+        async function exportToPDF() {{
+            try {{
+                // Mostrar loading
+                const originalBtn = event.target;
+                originalBtn.textContent = '📄 Gerando...';
+                originalBtn.disabled = true;
+                
+                console.log('=== EXPORTAÇÃO PDF INICIADA ===');
+                
+                // Verificar se há conteúdo
+                const contentEl = document.getElementById('content');
+                const sections = contentEl.querySelectorAll('.section');
+                
+                if (sections.length === 0) {{
+                    alert('⚠️ Nenhum conteúdo encontrado para exportar!');
+                    originalBtn.textContent = '📄 PDF';
+                    originalBtn.disabled = false;
+                    return;
+                }}
+                
+                console.log(`📊 Encontradas ${{sections.length}} seções para exportar`);
+                
+                // === ESTRATÉGIA SIMPLES E ROBUSTA ===
+                
+                // Criar cabeçalho simples
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'pdf-header-temp';
+                headerDiv.style.cssText = `
+                    background: white;
+                    padding: 20px;
+                    border-bottom: 3px solid #4A90E2;
+                    margin-bottom: 20px;
+                    font-family: Arial, sans-serif;
+                    display: none;
+                    print-color-adjust: exact;
+                    -webkit-print-color-adjust: exact;
+                `;
+                
+                // Informações do cabeçalho
+                const now = new Date();
+                const dateStr = now.toLocaleString('pt-BR');
+                const totalRecords = RECORDS.length;
+                const totalVars = VARS_META.length;
+                const activeFilters = getActiveFiltersDescription();
+                
+                // === CALCULAR PERÍODO DE COLETA ===
+                let periodoColeta = 'Não disponível';
+                try {{
+                    const submitDates = [];
+                    RECORDS.forEach(record => {{
+                        // Procurar por campos que possam conter Submit Date
+                        Object.keys(record).forEach(key => {{
+                            if (key.toLowerCase().includes('submit') || 
+                                key.toLowerCase().includes('date') || 
+                                key.toLowerCase().includes('data')) {{
+                                const value = record[key];
+                                if (value && value !== null) {{
+                                    // Tentar converter para data
+                                    const dateValue = new Date(value);
+                                    if (!isNaN(dateValue.getTime()) && dateValue.getFullYear() > 1900) {{
+                                        submitDates.push(dateValue);
+                                    }}
+                                }}
+                            }}
+                        }});
+                    }});
+                    
+                    if (submitDates.length > 0) {{
+                        const minDate = new Date(Math.min(...submitDates));
+                        const maxDate = new Date(Math.max(...submitDates));
+                        
+                        const formatDateBR = (date) => {{
+                            return date.toLocaleDateString('pt-BR');
+                        }};
+                        
+                        if (minDate.getTime() === maxDate.getTime()) {{
+                            periodoColeta = formatDateBR(minDate);
+                        }} else {{
+                            periodoColeta = `${{formatDateBR(minDate)}} até ${{formatDateBR(maxDate)}}`;
+                        }}
+                    }}
+                }} catch (error) {{
+                    console.log('ℹ️ Não foi possível calcular período de coleta:', error);
+                }}
+                
+                headerDiv.innerHTML = `
+                    <h1 style="color: #4A90E2; text-align: center; margin-bottom: 20px;">📋 DASHBOARD DE ANÁLISE - PESQUISA SPSS</h1>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: 14px;">
+                        <div>
+                            <div style="margin: 4px 0;"><strong>📂 Arquivo:</strong> {file_source}</div>
+                            <div style="margin: 4px 0;"><strong>📅 Gerado em:</strong> ${{dateStr}}</div>
+                            <div style="margin: 4px 0;"><strong>📅 Período de coleta:</strong> ${{periodoColeta}}</div>
+                        </div>
+                        <div>
+                            <div style="margin: 4px 0;"><strong>👥 Respondentes:</strong> ${{formatNumberBR(totalRecords)}}</div>
+                            <div style="margin: 4px 0;"><strong>📊 Variáveis analisadas:</strong> ${{formatNumberBR(totalVars)}}</div>
+                            <div style="margin: 4px 0;"><strong>🔍 Filtros aplicados:</strong> ${{activeFilters.join('; ') || 'Nenhum'}}</div>
+                        </div>
+                    </div>
+                `;
+                
+                // Inserir cabeçalho no INÍCIO do content (não no body)
+                const contentElement = document.getElementById('content');
+                if (contentElement && contentElement.firstChild) {{
+                    contentElement.insertBefore(headerDiv, contentElement.firstChild);
+                }} else {{
+                    contentElement.appendChild(headerDiv);
+                }}
+                
+                // Criar estilo de impressão
+                const printStyle = document.createElement('style');
+                printStyle.id = 'pdf-print-style';
+                printStyle.textContent = `
+                    @media print {{
+                        body {{ margin: 0; padding: 15mm; background: white; font-family: Arial, sans-serif; }}
+                        .filters-container {{ display: none !important; }}
+                        
+                        /* CABEÇALHO - Garantir que apareça */
+                        .pdf-header-temp {{ 
+                            display: block !important; 
+                            visibility: visible !important;
+                            position: static !important;
+                            margin-bottom: 30px !important;
+                            page-break-after: avoid !important;
+                            border-bottom: 3px solid #4A90E2 !important;
+                            padding-bottom: 20px !important;
+                        }}
+                        
+                        .section {{ margin-bottom: 20px; page-break-inside: avoid; }}
+                        .section-title {{ 
+                            font-size: 16px; 
+                            font-weight: bold; 
+                            color: #4A90E2; 
+                            margin: 20px 0 10px 0; 
+                            border-bottom: 2px solid #4A90E2; 
+                            padding-bottom: 5px; 
+                        }}
+                        table {{ 
+                            width: 100%; 
+                            border-collapse: collapse; 
+                            margin: 10px 0; 
+                            font-size: 11px; 
+                        }}
+                        table th {{ 
+                            background: #4A90E2 !important; 
+                            color: white !important; 
+                            padding: 8px 4px; 
+                            text-align: left; 
+                            border: 1px solid #357ABD; 
+                            -webkit-print-color-adjust: exact; 
+                        }}
+                        table td {{ 
+                            padding: 6px 4px; 
+                            border: 1px solid #ddd; 
+                            text-align: left; 
+                        }}
+                        table tr:nth-child(even) td {{ 
+                            background: #f8f9fa !important; 
+                            -webkit-print-color-adjust: exact; 
+                        }}
+                        .chart-container {{ 
+                            display: none !important;
+                        }}
+                        canvas {{ display: none !important; }}
+                    }}
+                `;
+                
+                document.head.appendChild(printStyle);
+                
+                // Aguardar um momento
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                console.log('🖨️ Abrindo diálogo de impressão...');
+                window.print();
+                
+                // Limpeza após 3 segundos
+                setTimeout(() => {{
+                    // Remover cabeçalho
+                    const header = document.querySelector('.pdf-header-temp');
+                    if (header && header.parentNode) {{
+                        header.parentNode.removeChild(header);
+                    }}
+                    
+                    // Remover estilos
+                    const style = document.getElementById('pdf-print-style');
+                    if (style && style.parentNode) {{
+                        style.parentNode.removeChild(style);
+                    }}
+                    
+                    console.log('🧹 Limpeza concluída');
+                }}, 3000);
+                
+                // Restaurar botão
+                originalBtn.textContent = '📄 PDF';
+                originalBtn.disabled = false;
+                
+                // Mostrar instruções
+                setTimeout(() => {{
+                    alert(`✅ Relatório em PDF gerado com sucesso!`);
+                }}, 800);
+                
+                console.log('✅ Processo de PDF concluído com sucesso');
+                
+            }} catch (error) {{
+                console.error('❌ Erro na exportação PDF:', error);
+                
+                // Restaurar botão
+                const btn = event.target;
+                btn.textContent = '📄 PDF';
+                btn.disabled = false;
+                
+                // Fallback mais simples
+                alert(`⚠️ Erro na exportação automática.\\n\\n` +
+                      `💡 ALTERNATIVA MANUAL:\\n` +
+                      `1. Pressione Ctrl+P (Cmd+P no Mac)\\n` +
+                      `2. Escolha "Salvar como PDF"\\n` +
+                      `3. Salve o arquivo\\n\\n` +
+                      `Erro detalhado: ${{error.message}}`);
+            }}
+        }}
         
     </script>
 </body>
@@ -2407,92 +3134,201 @@ def run_gui() -> int:
             label = get_var_label(meta, col)
             labels[col] = label if label else ""
         
-        # 2. JANELA DE SELEÇÃO - EXATAMENTE como a versão que funcionava
+        # Configurar estilo moderno para componentes ttk
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        # Estilo para combobox
+        style.configure("Modern.TCombobox", 
+                       fieldbackground="white",
+                       background="#f8f9fa",
+                       foreground="#2c3e50",
+                       borderwidth=1,
+                       relief="solid")
+        
+        # Configurar cores padrão para melhor visibilidade
+        style.configure("TLabel", background="#f8f9fa", foreground="#2c3e50")
+        style.configure("TFrame", background="#f8f9fa")
+        
+        # 2. JANELA DE SELEÇÃO - Layout moderno melhorado
         root.deiconify()
-        root.title("Dashboard SPSS Universal - Seleção de Variáveis")
-        root.geometry("1000x700")
+        root.title("📊 Dashboard SPSS Universal - Seleção de Variáveis")
+        root.geometry("1400x800")
+        root.minsize(1200, 700)
+        root.configure(bg="#f8f9fa")
         
-        # Frame principal
-        main_frame = tk.Frame(root, padx=20, pady=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Configurar cores padrão para evitar problemas de sistema
+        root.option_add('*TkDefaultFont', 'Segoe UI 10')
+        root.option_add('*Background', '#f8f9fa')
+        root.option_add('*Foreground', '#2c3e50')
         
-        # Título
-        title_label = tk.Label(main_frame, 
-                              text="Dashboard SPSS Universal", 
-                              font=("Arial", 16, "bold"), fg="#4A90E2")
-        title_label.pack(pady=(0, 10))
+        # Configurar grid weights para responsividade
+        root.grid_columnconfigure(0, weight=1)
+        root.grid_rowconfigure(0, weight=1)
         
-        # Info do arquivo
-        info_label = tk.Label(main_frame, 
-                             text=f"Arquivo: {os.path.basename(in_path)} | {len(df)} registros | {len(df.columns)} variáveis",
-                             font=("Arial", 11), fg="#666")
-        info_label.pack(pady=(0, 20))
+        # Frame principal com melhor padding
+        main_frame = tk.Frame(root, bg="#f8f9fa")
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=25, pady=20)
         
-        # Frame para listboxes lado a lado
-        lists_frame = tk.Frame(main_frame)
-        lists_frame.pack(fill=tk.BOTH, expand=True)
+        # Header melhorado
+        header_frame = tk.Frame(main_frame, bg="#f8f9fa")
+        header_frame.pack(fill=tk.X, pady=(0, 25))
         
-        # VARIÁVEIS PRINCIPAIS (lado esquerdo)
+        # Título principal
+        title_label = tk.Label(header_frame, 
+                              text="📊 Dashboard SPSS Universal", 
+                              font=("Segoe UI", 24, "bold"), 
+                              fg="#2c3e50", bg="#f8f9fa")
+        title_label.pack()
+        
+        # Subtítulo com informações do arquivo
+        subtitle_label = tk.Label(header_frame,
+                                 text=f"📁 {os.path.basename(in_path)} • {len(df):,} registros • {len(df.columns)} variáveis",
+                                 font=("Segoe UI", 12), 
+                                 fg="#7f8c8d", bg="#f8f9fa")
+        subtitle_label.pack(pady=(5, 0))
+        
+        # Container principal para as listas
+        content_frame = tk.Frame(main_frame, bg="#f8f9fa")
+        content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Frame para listboxes lado a lado com melhor espaçamento
+        lists_frame = tk.Frame(content_frame, bg="#f8f9fa")
+        lists_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+        
+        # VARIÁVEIS PRINCIPAIS (lado esquerdo) - Layout melhorado
         vars_frame = tk.LabelFrame(lists_frame, text="📊 VARIÁVEIS PARA O RELATÓRIO", 
-                                  font=("Arial", 12, "bold"), fg="#4A90E2", padx=10, pady=10)
-        vars_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+                                  font=("Segoe UI", 14, "bold"), fg="#2980b9", bg="#f8f9fa",
+                                  relief="solid", borderwidth=1, padx=15, pady=15)
+        vars_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 15))
         
+        # Informações melhoradas das variáveis principais
         vars_info = tk.Label(vars_frame, 
-                            text="Selecione as variáveis que aparecerão no dashboard:\\n• Múltiplas seleções com Ctrl/Cmd + clique\\n• Use Shift + clique para selecionar intervalos",
-                            font=("Arial", 10), fg="#666", justify=tk.LEFT)
-        vars_info.pack(fill=tk.X, pady=(0, 10))
+                            text="Selecione as variáveis para análise:\n• Ctrl/Cmd + clique: múltiplas seleções\n• Shift + clique: intervalos",
+                            font=("Segoe UI", 11), fg="#5d6d7e", bg="#f8f9fa", justify=tk.LEFT)
+        vars_info.pack(fill=tk.X, pady=(0, 15))
         
-        # Listbox de variáveis - CHAVE: exportselection=False
-        vars_listbox = tk.Listbox(vars_frame, selectmode=tk.EXTENDED, font=("Consolas", 10), 
-                                 exportselection=False, bg='#fafafa',
-                                 selectbackground='#4A90E2', selectforeground='white')
-        vars_scrollbar = tk.Scrollbar(vars_frame, orient=tk.VERTICAL, command=vars_listbox.yview)
+        # Container para listbox e scrollbar
+        vars_list_frame = tk.Frame(vars_frame, bg="#f8f9fa")
+        vars_list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        
+        # Listbox de variáveis melhorada
+        vars_listbox = tk.Listbox(vars_list_frame, selectmode=tk.EXTENDED, 
+                                 font=("Consolas", 11), exportselection=False, 
+                                 bg='white', fg="#2c3e50",
+                                 selectbackground='#3498db', selectforeground='white',
+                                 relief="solid", borderwidth=1, highlightthickness=0)
+        vars_scrollbar = tk.Scrollbar(vars_list_frame, orient=tk.VERTICAL, command=vars_listbox.yview)
         vars_listbox.config(yscrollcommand=vars_scrollbar.set)
         
-        vars_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        vars_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
         vars_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Botões de controle para variáveis
-        vars_buttons_frame = tk.Frame(vars_frame)
-        vars_buttons_frame.pack(fill=tk.X, pady=(10, 0))
+        # Botões de controle melhorados para variáveis
+        vars_buttons_frame = tk.Frame(vars_frame, bg="#f8f9fa")
+        vars_buttons_frame.pack(fill=tk.X)
         
-        tk.Button(vars_buttons_frame, text="Selecionar Todas", 
-                 command=lambda: vars_listbox.select_set(0, tk.END),
-                 font=("Arial", 9)).pack(side=tk.LEFT, padx=2)
-        tk.Button(vars_buttons_frame, text="Limpar", 
-                 command=lambda: vars_listbox.selection_clear(0, tk.END),
-                 font=("Arial", 9)).pack(side=tk.LEFT, padx=2)
-
-        # FILTROS (lado direito)
+        # Botão Selecionar Todas
+        select_all_btn = tk.Button(vars_buttons_frame, text="✅ Selecionar Todas", 
+                                  command=lambda: vars_listbox.select_set(0, tk.END),
+                                  font=("Segoe UI", 10, "bold"), bg="#1e8449", fg="#ffffff",
+                                  relief="flat", padx=15, pady=8, cursor="hand2")
+        select_all_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Efeitos hover para botão Selecionar Todas
+        def on_select_all_enter(e): select_all_btn.configure(bg="#239b56")
+        def on_select_all_leave(e): select_all_btn.configure(bg="#1e8449")
+        select_all_btn.bind("<Enter>", on_select_all_enter)
+        select_all_btn.bind("<Leave>", on_select_all_leave)
+        
+        # Botão Limpar
+        clear_btn = tk.Button(vars_buttons_frame, text="❌ Limpar", 
+                             command=lambda: vars_listbox.selection_clear(0, tk.END),
+                             font=("Segoe UI", 10, "bold"), bg="#c0392b", fg="#ffffff",
+                             relief="flat", padx=15, pady=8, cursor="hand2")
+        clear_btn.pack(side=tk.LEFT)
+        
+        # Efeitos hover para botão Limpar
+        def on_clear_enter(e): clear_btn.configure(bg="#a93226")
+        def on_clear_leave(e): clear_btn.configure(bg="#c0392b")
+        clear_btn.bind("<Enter>", on_clear_enter)
+        clear_btn.bind("<Leave>", on_clear_leave)
+        
+        # FILTROS (lado direito) - Layout melhorado
         filters_frame = tk.LabelFrame(lists_frame, text="🔍 VARIÁVEIS-FILTRO (Opcional)", 
-                                     font=("Arial", 12, "bold"), fg="#9C27B0", padx=10, pady=10)
-        filters_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
+                                     font=("Segoe UI", 14, "bold"), fg="#8e44ad", bg="#f8f9fa",
+                                     relief="solid", borderwidth=1, padx=15, pady=15)
+        filters_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
+        # Informações melhoradas dos filtros
         filters_info = tk.Label(filters_frame, 
-                               text="Selecione variáveis para filtrar os dados:\\n• Opcional - pode deixar em branco\\n• Útil para segmentação (idade, região, etc.)",
-                               font=("Arial", 10), fg="#666", justify=tk.LEFT)
-        filters_info.pack(fill=tk.X, pady=(0, 10))
+                               text="Filtros para segmentação:\n• Opcional (pode deixar vazio)\n• Útil para análises específicas",
+                               font=("Segoe UI", 11), fg="#5d6d7e", bg="#f8f9fa", justify=tk.LEFT)
+        filters_info.pack(fill=tk.X, pady=(0, 15))
         
-        # Listbox de filtros - CHAVE: exportselection=False
-        filters_listbox = tk.Listbox(filters_frame, selectmode=tk.EXTENDED, font=("Consolas", 10),
-                                    exportselection=False, bg='#fafafa',
-                                    selectbackground='#9C27B0', selectforeground='white')
-        filters_scrollbar = tk.Scrollbar(filters_frame, orient=tk.VERTICAL, command=filters_listbox.yview)
+        # Container para listbox de filtros
+        filters_list_frame = tk.Frame(filters_frame, bg="#f8f9fa")
+        filters_list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        
+        # Listbox de filtros melhorada
+        filters_listbox = tk.Listbox(filters_list_frame, selectmode=tk.EXTENDED, 
+                                    font=("Consolas", 11), exportselection=False,
+                                    bg='white', fg="#2c3e50",
+                                    selectbackground='#9b59b6', selectforeground='white',
+                                    relief="solid", borderwidth=1, highlightthickness=0)
+        filters_scrollbar = tk.Scrollbar(filters_list_frame, orient=tk.VERTICAL, command=filters_listbox.yview)
         filters_listbox.config(yscrollcommand=filters_scrollbar.set)
         
-        filters_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        filters_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
         filters_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Botões de controle para filtros
-        filters_buttons_frame = tk.Frame(filters_frame)
-        filters_buttons_frame.pack(fill=tk.X, pady=(10, 0))
+        # Botões de controle melhorados para filtros
+        filters_buttons_frame = tk.Frame(filters_frame, bg="#f8f9fa")
+        filters_buttons_frame.pack(fill=tk.X)
         
-        tk.Button(filters_buttons_frame, text="Selecionar Todas", 
-                 command=lambda: filters_listbox.select_set(0, tk.END),
-                 font=("Arial", 9)).pack(side=tk.LEFT, padx=2)
-        tk.Button(filters_buttons_frame, text="Limpar", 
-                 command=lambda: filters_listbox.selection_clear(0, tk.END),
-                 font=("Arial", 9)).pack(side=tk.LEFT, padx=2)
+        # Botão Selecionar Todas (filtros)
+        filters_select_all_btn = tk.Button(filters_buttons_frame, text="✅ Selecionar Todas", 
+                                          command=lambda: filters_listbox.select_set(0, tk.END),
+                                          font=("Segoe UI", 10, "bold"), bg="#1e8449", fg="#ffffff",
+                                          relief="flat", padx=15, pady=8, cursor="hand2")
+        filters_select_all_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Efeitos hover para botão Selecionar Todas (filtros)
+        def on_filters_select_enter(e): filters_select_all_btn.configure(bg="#239b56")
+        def on_filters_select_leave(e): filters_select_all_btn.configure(bg="#1e8449")
+        filters_select_all_btn.bind("<Enter>", on_filters_select_enter)
+        filters_select_all_btn.bind("<Leave>", on_filters_select_leave)
+        
+        # Botão Limpar (filtros)
+        filters_clear_btn = tk.Button(filters_buttons_frame, text="❌ Limpar", 
+                                     command=lambda: filters_listbox.selection_clear(0, tk.END),
+                                     font=("Segoe UI", 10, "bold"), bg="#c0392b", fg="#ffffff",
+                                     relief="flat", padx=15, pady=8, cursor="hand2")
+        filters_clear_btn.pack(side=tk.LEFT)
+        
+        # Efeitos hover para botão Limpar (filtros)
+        def on_filters_clear_enter(e): filters_clear_btn.configure(bg="#a93226")
+        def on_filters_clear_leave(e): filters_clear_btn.configure(bg="#c0392b")
+        filters_clear_btn.bind("<Enter>", on_filters_clear_enter)
+        filters_clear_btn.bind("<Leave>", on_filters_clear_leave)
+        
+        # PESO/PONDERAÇÃO (nova seção melhorada abaixo dos filtros)
+        weight_frame = tk.LabelFrame(filters_frame, text="⚖️ VARIÁVEL PESO (Opcional)", 
+                                   font=("Segoe UI", 13, "bold"), fg="#e67e22", bg="#f8f9fa",
+                                   relief="solid", borderwidth=1, padx=15, pady=10)
+        weight_frame.pack(fill=tk.X, pady=(20, 0))
+        
+        weight_info = tk.Label(weight_frame, 
+                             text="Para pesquisas por amostragem:",
+                             font=("Segoe UI", 10), fg="#5d6d7e", bg="#f8f9fa")
+        weight_info.pack(fill=tk.X, pady=(0, 8))
+        
+        # Combobox melhorado para seleção de peso
+        weight_var = tk.StringVar()
+        weight_combo = ttk.Combobox(weight_frame, textvariable=weight_var, 
+                                  font=("Segoe UI", 11), state="readonly", width=30,
+                                  style="Modern.TCombobox")
+        weight_combo.pack(fill=tk.X)
         
         # POPULAR AS LISTAS COM VARIÁVEIS (preservando ordem original do SPSS)
         print(f"🔧 Preservando ordem original das {len(df.columns)} variáveis do SPSS")
@@ -2506,13 +3342,33 @@ def run_gui() -> int:
             vars_listbox.insert(tk.END, display_text)
             filters_listbox.insert(tk.END, display_text)
         
+        # Popular combobox de peso apenas com variáveis numéricas candidatas
+        weight_candidates = ["(Nenhuma - sem ponderação)"]
+        for col in df.columns:
+            # Detectar se é variável numérica (candidata a peso)
+            if col.lower() in ['peso', 'weight', 'pond', 'ponderacao', 'factor', 'wgt']:
+                weight_candidates.append(f"{col} | {labels.get(col, '(peso)')}")
+            elif df[col].dtype in ['int64', 'float64'] or pd.api.types.is_numeric_dtype(df[col]):
+                # Verificar se parece com peso (valores entre 0.1 e 10, média próxima de 1)
+                numeric_vals = pd.to_numeric(df[col], errors='coerce').dropna()
+                if len(numeric_vals) > 0:
+                    mean_val = numeric_vals.mean()
+                    min_val = numeric_vals.min()
+                    max_val = numeric_vals.max()
+                    if 0.1 <= min_val and max_val <= 20 and 0.5 <= mean_val <= 3.0:
+                        weight_candidates.append(f"{col} | {labels.get(col, '(numérica)')}")
+        
+        weight_combo['values'] = weight_candidates
+        weight_combo.current(0)  # Seleciona "Nenhuma" por padrão
+        
         # Variáveis para armazenar seleções
         selected_vars = []
         selected_filters = []
+        selected_weight = None
         success = False
         
         def on_generate():
-            nonlocal selected_vars, selected_filters, success
+            nonlocal selected_vars, selected_filters, selected_weight, success
             
             # Obter seleções
             var_indices = vars_listbox.curselection()
@@ -2527,6 +3383,16 @@ def run_gui() -> int:
             selected_vars = [columns_list[i] for i in var_indices]
             selected_filters = [columns_list[i] for i in filter_indices]
             
+            # Obter variável peso selecionada
+            weight_selection = weight_var.get()
+            if weight_selection and not weight_selection.startswith("(Nenhuma"):
+                # Extrair nome da variável do formato "PESO | descrição"
+                selected_weight = weight_selection.split(" | ")[0]
+                if selected_weight not in df.columns:
+                    selected_weight = None
+            else:
+                selected_weight = None
+            
             success = True
             root.quit()
         
@@ -2535,25 +3401,58 @@ def run_gui() -> int:
             success = False
             root.quit()
         
-        # Botões
-        buttons_frame = tk.Frame(main_frame)
-        buttons_frame.pack(fill=tk.X, pady=(20, 0))
+        # BOTÕES FINAIS - Layout moderno
+        buttons_section = tk.Frame(main_frame, bg="#f8f9fa")
+        buttons_section.pack(fill=tk.X, pady=(30, 0))
         
-        tk.Button(buttons_frame, text="❌ Cancelar", command=on_cancel, 
-                 font=("Arial", 12), width=15, bg="#f0f0f0").pack(side=tk.LEFT)
+        # Frame para centralizar botões
+        buttons_frame = tk.Frame(buttons_section, bg="#f8f9fa")
+        buttons_frame.pack(anchor=tk.CENTER)
         
-        tk.Button(buttons_frame, text="✅ Gerar Dashboard", command=on_generate, 
-                 font=("Arial", 12, "bold"), width=20, bg="#4CAF50", fg="white").pack(side=tk.RIGHT)
+        # Botão Cancelar melhorado
+        cancel_btn = tk.Button(buttons_frame, text="❌ Cancelar", command=on_cancel, 
+                              font=("Segoe UI", 12, "bold"), width=15, 
+                              bg="#bdc3c7", fg="#2c3e50", relief="flat",
+                              padx=20, pady=12, cursor="hand2")
+        cancel_btn.pack(side=tk.LEFT, padx=(0, 20))
         
-        # Info
-        info_label = tk.Label(main_frame, 
-                             text="💡 INSTRUÇÕES DE SELEÇÃO:\\n"
-                                  "• Clique simples: seleciona um item\\n"
-                                  "• Ctrl/Cmd + clique: adiciona à seleção\\n"
-                                  "• Shift + clique: seleciona intervalo\\n"
-                                  "• Use os botões para facilitar a seleção", 
-                             font=("Arial", 10), fg="#666", justify=tk.LEFT)
-        info_label.pack(pady=(10, 0))
+        # Efeitos hover para botão Cancelar
+        def on_cancel_enter(e): cancel_btn.configure(bg="#95a5a6")
+        def on_cancel_leave(e): cancel_btn.configure(bg="#bdc3c7")
+        cancel_btn.bind("<Enter>", on_cancel_enter)
+        cancel_btn.bind("<Leave>", on_cancel_leave)
+        
+        # Botão Gerar melhorado
+        generate_btn = tk.Button(buttons_frame, text="🚀 Gerar Dashboard", command=on_generate, 
+                                font=("Segoe UI", 12, "bold"), width=20, 
+                                bg="#1e8449", fg="#ffffff", relief="flat",
+                                padx=25, pady=12, cursor="hand2")
+        generate_btn.pack(side=tk.RIGHT)
+        
+        # Efeitos hover para botão Gerar
+        def on_generate_enter(e): generate_btn.configure(bg="#239b56")
+        def on_generate_leave(e): generate_btn.configure(bg="#1e8449")
+        generate_btn.bind("<Enter>", on_generate_enter)
+        generate_btn.bind("<Leave>", on_generate_leave)
+        
+        # Instruções melhoradas
+        instructions_frame = tk.Frame(main_frame, bg="#f8f9fa")
+        instructions_frame.pack(fill=tk.X, pady=(20, 10))
+        
+        instructions_title = tk.Label(instructions_frame, 
+                                     text="💡 INSTRUÇÕES DE USO",
+                                     font=("Segoe UI", 12, "bold"), 
+                                     fg="#34495e", bg="#f8f9fa")
+        instructions_title.pack(anchor=tk.W)
+        
+        instructions_text = tk.Label(instructions_frame, 
+                                    text="• Clique simples: seleciona um item\n"
+                                         "• Ctrl/Cmd + clique: múltiplas seleções\n"
+                                         "• Shift + clique: seleciona intervalo\n"
+                                         "• Use os botões para facilitar a seleção", 
+                                    font=("Segoe UI", 10), fg="#7f8c8d", bg="#f8f9fa", 
+                                    justify=tk.LEFT)
+        instructions_text.pack(anchor=tk.W, pady=(5, 0))
         
         # Executar interface
         root.mainloop()
@@ -2610,14 +3509,14 @@ def run_gui() -> int:
 
         # 4. PROCESSAMENTO
         print("⚙️ Processando dados...")
-        created_at, vars_meta, filters_meta, records, value_orders = build_records_and_meta(
-            df, meta, selected_vars, selected_filters, os.path.basename(in_path), ""
+        created_at, vars_meta, filters_meta, records, value_orders, code_to_label = build_records_and_meta(
+            df, meta, selected_vars, selected_filters, os.path.basename(in_path), "", selected_weight
         )
 
         print("🎨 Gerando HTML universal...")
         html = render_html_with_working_filters(
             os.path.basename(in_path), created_at, "",
-            vars_meta, filters_meta, records, value_orders
+            vars_meta, filters_meta, records, value_orders, code_to_label
         )
         
         with open(out_path, "w", encoding="utf-8") as f:
@@ -2634,6 +3533,10 @@ def run_gui() -> int:
 • Filtros: {len(filters_meta)}
 • Arquivo gerado: {os.path.basename(out_path)}
 """
+        
+        # Informar sobre ponderação
+        if selected_weight:
+            result_msg += f"⚖️ Ponderação aplicada: {selected_weight}\\n"
         
         # Adiciona informações resumidas sobre tipos especiais de variáveis
         special_vars = []
@@ -2687,13 +3590,13 @@ def run_cli() -> int:
         
         out_path = args.output or os.path.splitext(args.input)[0] + "_dashboard_universal.html"
         
-        created_at, vars_meta, filters_meta, records, value_orders = build_records_and_meta(
-            df, meta, selected_vars, filter_vars, os.path.basename(args.input), args.cliente
+        created_at, vars_meta, filters_meta, records, value_orders, code_to_label = build_records_and_meta(
+            df, meta, selected_vars, filter_vars, os.path.basename(args.input), args.cliente, None
         )
 
         html = render_html_with_working_filters(
             os.path.basename(args.input), created_at, args.cliente,
-            vars_meta, filters_meta, records, value_orders
+            vars_meta, filters_meta, records, value_orders, code_to_label
         )
         
         with open(out_path, "w", encoding="utf-8") as f:

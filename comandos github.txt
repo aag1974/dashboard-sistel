@@ -1,3 +1,3 @@
 git add .
-git commit -m "Dashboard atualizado 2025"
+git commit -m "Atualizacao PDF"
 git push -u origin main
