@@ -620,6 +620,10 @@ def detect_mr_groups_improved(selected_vars: List[str], meta, df) -> Tuple[Dict[
             
         # Testar padrões MR comuns
         patterns = [
+            r"^([A-Za-z]+\d+_\d+)_(\d+)([A-Za-z]*)$",   # IM4_1_1, IM4_2_10, etc.
+            r"^([A-Za-z]+\d+)_(\d+)([A-Za-z]*)$",       # P01_1, AP05_2, etc.
+            r"^([A-Za-z]+)(\d+)_(\d+)$",                # P1_1, A5_2, etc.
+            r"^([A-Za-z]+\d+[A-Za-z]*)_(\d+)$"          # P01A_1, Q5B_2, etc.
             r"^([A-Za-z]+\d+)_(\d+)([A-Za-z]*)$",  # P01_1, AP05_2, etc.
             r"^([A-Za-z]+)(\d+)_(\d+)$",            # P1_1, A5_2, etc.  
             r"^([A-Za-z]+\d+[A-Za-z]*)_(\d+)$"      # P01A_1, Q5B_2, etc.
