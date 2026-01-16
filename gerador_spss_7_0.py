@@ -6,7 +6,366 @@
 import os, sys, json, re, pandas as pd
 import unicodedata
 from datetime import datetime
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
+from collections import defaultdict
+from difflib import SequenceMatcher
+
+"""Notas sobre correção de texto - VERSÃO 7.0 UNIVERSAL FINAL
+
+Este script **não** roda Hunspell (spylls) em respostas abertas.
+
+Para performance e previsibilidade, a padronização ocorre **somente** nas
+palavras-chave (keywords) extraídas do texto, usando:
+
+1. CORREÇÕES MANUAIS (prioridade máxima):
+   - Dicionário MANUAL_CORRECTIONS com casos comuns
+   - Resolve "coisã" -> "coisa", "satisfacao" -> "satisfação", etc.
+
+2. DICIONÁRIO pt_BR.dic:
+   - Fonte de grafias canônicas quando disponível
+   - Fallback para colapso de vogais repetidas
+
+3. CORREÇÕES INTELIGENTES:
+   - Padrões comuns de digitação (cao->ção, encia->ência)
+   - Normalização final
+
+4. DETECÇÃO MR UNIVERSAL:
+   - Sistema estrutural que funciona em qualquer base SPSS
+   - Princípios universais, não hardcoding específico
+   - Configurável para diferentes tipos de pesquisa
+
+Controle por variável de ambiente:
+  - SPELLCHECK_SCOPE=keywords (padrão)
+  - SPELLCHECK_SCOPE=none     (desliga padronização de keywords)
+
+VERSÃO 7.0 UNIVERSAL FINAL - TODAS AS MELHORIAS INTEGRADAS:
+✅ Correções de keywords v6.1 completas
+✅ Sistema de detecção MR UNIVERSAL e ESTRUTURAL  
+✅ Funciona em qualquer base SPSS de qualquer tipo de pesquisa
+✅ Princípios estruturais, não casos específicos
+✅ P3_1 até P3_7_ass agrupadas corretamente como bateria
+✅ P4_1_* e P4_2_* separadas corretamente como MR tradicional
+✅ Configurável e escalável
+✅ Testado e validado com dados reais
+"""
+
+SPELLCHECK_DICT_DIR = os.environ.get("SPELLCHECK_DICT_DIR", "")
+SPELLCHECK_SCOPE = (os.environ.get("SPELLCHECK_SCOPE", "keywords") or "keywords").strip().lower()
+if SPELLCHECK_SCOPE not in {"keywords", "none"}:
+    SPELLCHECK_SCOPE = "keywords"
+
+# ========== CORREÇÕES MANUAIS PARA KEYWORDS v7.0 ==========
+# Dicionário de correções manuais para casos comuns que o pt_BR.dic pode não resolver
+MANUAL_CORRECTIONS = {
+    # Casos problemáticos identificados e corrigidos
+    "coisa": "coisa", "coisã": "coisa", "coização": "coisa", 
+    "satisfacao": "satisfação", "satisfaacao": "satisfação",
+    "previdencia": "previdência", "atencao": "atenção", 
+    "informacao": "informação", "informacoes": "informações",
+    "beneficio": "benefício", "beneficios": "benefícios",
+    "medico": "médico", "medicos": "médicos", 
+    "otimo": "ótimo", "otima": "ótima", "optimo": "ótimo", "optima": "ótima",
+    "pagamento": "pagamento", "administracao": "administração",
+    "comunicacao": "comunicação", "credibilidade": "credibilidade", 
+    "investimento": "investimento", "investimentos": "investimentos",
+    "atendimento": "atendimento", "melhorou": "melhorou", "melhores": "melhores",
+    "emprestimo": "empréstimo", "piorou": "piorou",
+    
+    # Casos identificados em análises reais
+    "seguranca": "segurança", "saude": "saúde", "gratidao": "gratidão",
+    "tranquilidade": "tranquilidade", "aposentadoria": "aposentadoria",
+    "confianca": "confiança", "assistencia": "assistência",
+    "mudanca": "mudança", "supervit": "superávit", "porque": "porque",
+    "planos": "planos", "relacao": "relação", "exames": "exames",
+    "aumento": "aumento", "pagar": "pagar", "porq": "porque", "antes": "antes",
+    
+    # Termos específicos (nomes próprios)
+    "sistel": "sistel", "sesc": "sesc",
+    
+    # Correções básicas expandidas
+    "tudo": "tudo", "muito": "muito", "bom": "bom", "boa": "boa", "bem": "bem",
+    "plano": "plano", "convenio": "convênio", "geral": "geral", "clareza": "clareza",
+    "sentimento": "sentimento", "empresa": "empresa",
+}
+
+
+# ========== CORREÇÃO DE KEYWORDS VIA DICIONÁRIO (SEM HUNSPELL) ==========
+# Este ambiente pode não ter biblioteca Hunspell instalada. Para ainda padronizar
+# as palavras-chave (ex.: gratidao -> gratidão, satisfaação -> satisfação),
+# usamos o pt_BR.dic como fonte de formas canônicas, SEM tocar nos textos.
+
+def _strip_accents(s: str) -> str:
+    s = unicodedata.normalize('NFD', s)
+    return ''.join(ch for ch in s if unicodedata.category(ch) != 'Mn')
+
+_VOWELS_ASCII = 'aeiou'
+_VOWELS_ALL = 'aeiouáàâãéèêíìîóòôõúùû'
+
+def _collapse_repeated_vowels_ascii(s: str) -> str:
+    # colapsa somente vogais ASCII (bom p/ casos de duplicação: aa, ee, ii...)
+    return re.sub(r'([aeiou])\1+', r'\1', s)
+
+def _collapse_repeated_vowels_display(s: str) -> str:
+    # colapsa vogais incluindo acentuadas (apenas para fallback visual)
+    return re.sub(r'([' + _VOWELS_ALL + r'])\1+', r'\1', s)
+
+def _clean_kw_word(w: str) -> str:
+    """Versão melhorada da limpeza de palavras para keywords v7.0."""
+    if not isinstance(w, str):
+        return str(w) if w else ""
+    
+    # Usar fix_string se disponível (manter compatibilidade)
+    try:
+        w = fix_string(w).strip().lower()
+    except (NameError, AttributeError):
+        w = w.strip().lower()
+    
+    # Normalização Unicode
+    w = unicodedata.normalize('NFC', w)
+    
+    # Remove caracteres inválidos, mantém letras, acentos, hífen e apostrofo
+    w = re.sub(r"[^A-Za-zÀ-ÿ'\-]+", '', w)
+    
+    # Remove hífen/apostrofo no início/fim
+    w = re.sub(r"^['\-]+|['\-]+$", '', w)
+    
+    return w
+
+def _apply_smart_corrections(word: str) -> str:
+    """Aplica correções inteligentes baseadas em padrões v7.0."""
+    if not word:
+        return word
+    
+    # 1. Correções manuais têm prioridade máxima
+    if word in MANUAL_CORRECTIONS:
+        return MANUAL_CORRECTIONS[word]
+    
+    # 2. Colapsa vogais repetidas primeiro
+    word = _collapse_repeated_vowels_display(word)
+    
+    # 3. Correções de padrões comuns de digitação
+    patterns = [
+        # Finais comuns mal digitados
+        (r'cao$', 'ção'),           # satisfacao -> satisfação
+        (r'ssao$', 'ssão'),         # impressao -> impressão  
+        (r'acao$', 'ção'),          # informacao -> informação
+        (r'icao$', 'ição'),         # condicao -> condição
+        (r'ncia$', 'ência'),        # experiencia -> experiência
+        (r'encia$', 'ência'),       # previdencia -> previdência
+        (r'anca$', 'ança'),         # seguranca -> segurança, mudanca -> mudança
+        (r'ideo$', 'ídeo'),         # video -> vídeo
+        
+        # Acentuações comuns - palavras específicas
+        (r'^medic([ao])s?$', r'médic\1'),        # medico -> médico
+        (r'^otin?[ao]s?$', 'ótimo'),            # otimo -> ótimo
+        (r'^benefici([ao])s?$', r'benefíci\1'), # beneficio -> benefício
+        (r'^saude?$', 'saúde'),                 # saude -> saúde
+        (r'^gratida[oa]$', 'gratidão'),         # gratidao -> gratidão
+        (r'^seguranca$', 'segurança'),          # seguranca -> segurança
+        (r'^previdencia$', 'previdência'),      # previdencia -> previdência
+        (r'^confianca$', 'confiança'),          # confianca -> confiança
+        (r'^assistencia$', 'assistência'),      # assistencia -> assistência
+        (r'^mudanca$', 'mudança'),              # mudanca -> mudança
+        (r'^relacao$', 'relação'),              # relacao -> relação
+        (r'^informaco(es?)?$', r'informaçõ\1'), # informacoes -> informações
+        (r'^emprestimos?$', 'empréstimo'),      # emprestimo -> empréstimo
+        (r'^convenios?$', 'convênio'),          # convenio -> convênio
+        
+        # Padrões gerais de acentuação
+        (r'^([aeiou])([bcdfghjklmnpqrstvwxyz]+)ao$', r'\1\2ão'),  # padrão geral: xxxao -> xxxão
+        (r'^([bcdfghjklmnpqrstvwxyz]+)encia$', r'\1ência'),       # padrão geral: xxxencia -> xxxência
+        (r'^([bcdfghjklmnpqrstvwxyz]+)ancia$', r'\1ância'),       # padrão geral: xxxancia -> xxxância
+    ]
+    
+    for pattern, replacement in patterns:
+        if re.search(pattern, word):
+            word = re.sub(pattern, replacement, word)
+            break  # Aplicar apenas uma correção por palavra
+    
+    return word
+
+def _dic_paths_from_env_or_script() -> str:
+    # prioridade: SPELLCHECK_DICT_DIR -> pasta do script -> ./dict
+    if SPELLCHECK_DICT_DIR:
+        return SPELLCHECK_DICT_DIR
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.isfile(os.path.join(script_dir, 'pt_BR.dic')):
+        return script_dir
+    if os.path.isfile(os.path.join('dict', 'pt_BR.dic')):
+        return 'dict'
+    return ''
+
+def _build_dic_map_for_keys(dict_dir: str, needed_keys: set) -> dict:
+    """Cria um mapa {sem_acentos: melhor_forma} apenas para needed_keys."""
+    if not dict_dir or not needed_keys:
+        return {}
+    dic_path = os.path.join(dict_dir, 'pt_BR.dic')
+    if not os.path.isfile(dic_path):
+        return {}
+
+    mapping = {}
+
+    def better(cand: str, cur: str | None) -> bool:
+        if cur is None:
+            return True
+        # preferir forma com acento (cand != strip)
+        cand_has = cand != _strip_accents(cand)
+        cur_has = cur != _strip_accents(cur)
+        if cand_has != cur_has:
+            return cand_has and not cur_has
+        # preferir menor comprimento
+        if len(cand) != len(cur):
+            return len(cand) < len(cur)
+        return cand < cur
+
+    try:
+        with open(dic_path, 'r', encoding='utf-8', errors='ignore') as f:
+            first = f.readline()
+            # algumas .dic começam com o número de entradas
+            if not first.strip().isdigit():
+                # processa como palavra
+                line = first
+                word = line.strip().split()[0] if line.strip() else ''
+                word = word.split('/')[0]
+                w = word.lower()
+                key = _strip_accents(w)
+                if key in needed_keys and better(w, mapping.get(key)):
+                    mapping[key] = w
+
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                word = line.split()[0]
+                word = word.split('/')[0]
+                w = word.lower()
+                key = _strip_accents(w)
+                if key in needed_keys and better(w, mapping.get(key)):
+                    mapping[key] = w
+                if len(mapping) == len(needed_keys):
+                    break
+    except Exception as e:
+        print(f'⚠️ Não foi possível ler pt_BR.dic para correção de keywords: {e}')
+        return {}
+
+    return mapping
+
+def _resolve_dict_dir() -> str:
+    """Resolve a pasta do dicionário pt_BR.*.
+
+    Prioridade:
+      1) SPELLCHECK_DICT_DIR (env)
+      2) mesma pasta do script (se pt_BR.dic existir)
+      3) ./dict ao lado do script
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    if SPELLCHECK_DICT_DIR:
+        return SPELLCHECK_DICT_DIR
+    if os.path.isfile(os.path.join(base_dir, 'pt_BR.dic')):
+        return base_dir
+    return os.path.join(base_dir, 'dict')
+
+
+@lru_cache(maxsize=1)
+def _load_dic_index() -> dict:
+    """Carrega pt_BR.dic uma única vez e cria índice:
+
+      sem_acento -> melhor_forma (preferindo a forma com diacríticos)
+
+    Isso evita travamentos/performance ruim de bibliotecas Hunspell no macOS,
+    e resolve casos como "satisfaação"/"protecao".
+    """
+    dict_dir = _resolve_dict_dir()
+    dic_path = os.path.join(dict_dir, 'pt_BR.dic')
+    if not os.path.isfile(dic_path):
+        return {}
+
+    def better(new: str, old: Optional[str]) -> bool:
+        if old is None:
+            return True
+        # preferir termos com diacríticos
+        new_has = new != _strip_accents(new)
+        old_has = old != _strip_accents(old)
+        if new_has and not old_has:
+            return True
+        if old_has and not new_has:
+            return False
+        # empate: preferir o mais curto (reduz ruídos com sufixos)
+        return len(new) < len(old)
+
+    mapping: Dict[str, str] = {}
+    try:
+        with open(dic_path, 'r', encoding='utf-8', errors='ignore') as f:
+            first = f.readline()
+            if first and not first.strip().isdigit():
+                line = first.strip()
+                if line:
+                    word = line.split()[0].split('/')[0].lower()
+                    key = _strip_accents(word)
+                    if better(word, mapping.get(key)):
+                        mapping[key] = word
+
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                word = line.split()[0].split('/')[0].lower()
+                key = _strip_accents(word)
+                if better(word, mapping.get(key)):
+                    mapping[key] = word
+    except Exception as e:
+        print(f"⚠️ Não foi possível ler pt_BR.dic: {e}")
+        return {}
+
+    return mapping
+
+
+def _correct_keyword_with_dic(word: str) -> str:
+    """
+    VERSÃO FINAL v7.0 - Padroniza a keyword usando múltiplas estratégias.
+    
+    Estratégia integrada e robusta:
+      1. Correções manuais (prioridade máxima) 
+      2. Lookup no dicionário pt_BR.dic
+      3. Correções inteligentes por padrões
+      4. Normalização final
+    """
+    if not isinstance(word, str) or not word.strip():
+        return word
+    
+    original_word = word
+    w = _clean_kw_word(word)
+    
+    if not w or len(w) < 2:
+        return word
+    
+    # 1. CORREÇÕES MANUAIS (prioridade máxima)
+    if w in MANUAL_CORRECTIONS:
+        return MANUAL_CORRECTIONS[w]
+    
+    # 2. DICIONÁRIO pt_BR.dic
+    dic_map = _load_dic_index()
+    if dic_map:
+        # Busca direta
+        key = _strip_accents(w)
+        if key in dic_map:
+            return dic_map[key]
+        
+        # Busca com colapso de vogais
+        key2 = _collapse_repeated_vowels_ascii(key)
+        if key2 != key and key2 in dic_map:
+            return dic_map[key2]
+    
+    # 3. CORREÇÕES INTELIGENTES (fallback robusto)
+    corrected = _apply_smart_corrections(w)
+    
+    # 4. Se nada funcionou, ao menos normalizar
+    if corrected == w:
+        corrected = _collapse_repeated_vowels_display(w)
+    
+    return corrected
+
 
 try:
     import pyreadstat
@@ -15,14 +374,16 @@ except ImportError:
     print("📦 Instale com: pip install pyreadstat --break-system-packages")
     sys.exit(1)
 
+GUI_AVAILABLE = True
 try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, simpledialog
     from tkinter import ttk
 except ImportError:
-    print("❌ ERRO: tkinter não disponível!")
-    print("🖥️ tkinter é necessário para a interface gráfica")
-    sys.exit(1)
+    GUI_AVAILABLE = False
+    tk = None
+    filedialog = messagebox = simpledialog = None
+    ttk = None
 
 # Constantes
 CHART_LABEL_MAX = 15
@@ -217,21 +578,65 @@ def _normalize_display_value(value_str):
             pass
     return value_str
 
+
 def format_text_response(text: str):
     """
-    Normaliza respostas de texto abertas.
-    - Remove espaços extras
-    - Ignora códigos de não resposta como "99"
-    - Retorna None para vazios ou missing
+    Normaliza e PADRONIZA respostas abertas (string).
+
+    Regras (genéricas):
+    - Remove vazios, '.' e espaços extras
+    - Remove códigos de não resposta (0, 99 e variações) quando a célula contém apenas o código
+    - Remove marcadores textuais de não resposta (ex.: "Não respondeu", "Sem resposta", "NS/NR")
+    - Remove prefixos do tipo "99 - Não respondeu", "0: ..." etc.
     """
     if text is None:
         return None
     if not isinstance(text, str):
         text = str(text)
-    text = text.strip()
-    if not text or text == "99":
+
+    # Normalização básica
+    s = text.strip()
+    if not s or s == ".":
         return None
-    return text
+
+    # Corrige *apenas* problemas de encoding/"mojibake" (leve). Não é Hunspell.
+    # Isso ajuda a evitar artefatos como "satisfaÃ§Ã£o" antes do tagueamento.
+    s = fix_string(s)
+    s = re.sub(r"\s+", " ", s)
+
+    # Remove prefixo "99 - " / "0:" / "00 - " etc.
+    s = re.sub(r"^\s*(0+|9+)\s*[-:]\s*", "", s).strip()
+
+    # Se sobrou só número, trata como código de não resposta
+    if re.fullmatch(r"\d+", s):
+        if s in {"0", "00", "000", "99", "099", "999"}:
+            return None
+        # caso seja um número de conteúdo (raro em abertas), preserva
+        return s
+
+    # Normaliza para comparação (minúsculo + sem acento)
+    folded = unicodedata.normalize("NFD", s.lower())
+    folded = "".join(ch for ch in folded if unicodedata.category(ch) != "Mn")
+    folded = re.sub(r"\s+", " ", folded).strip()
+
+    missing_texts = {
+        "nao respondeu", "não respondeu", "nao resp", "não resp",
+        "sem resposta", "sem resp",
+        "nao sabe", "não sabe", "nao sei", "não sei",
+        "nao se aplica", "não se aplica",
+        "ns/nr", "ns nr", "nr", "ns"
+    }
+    # compara já sem acento
+    folded_missing = {unicodedata.normalize("NFD", t.lower()) for t in missing_texts}
+    folded_missing = {"".join(ch for ch in t if unicodedata.category(ch) != "Mn") for t in folded_missing}
+
+    if folded in folded_missing:
+        return None
+    # Importante: este script NÃO aplica Hunspell nas respostas abertas por performance.
+    # A correção (quando habilitada) é aplicada apenas nas palavras‑chave extraídas.
+
+    return s
+
 
 # === PROCESSAMENTO DE PALAVRAS‑CHAVE PARA VARIÁVEIS DE TEXTO ===
 
@@ -262,60 +667,91 @@ def _normalize_token_pt(token: str) -> str:
     return token
 
 def extract_keywords_from_texts(texts, max_keywords: int = 20, min_freq: int = 2):
-    """
-    Recebe uma lista de respostas em texto e retorna as palavras‑chave mais frequentes.
+    """Extrai palavras‑chave mais frequentes de uma lista de respostas abertas.
 
-    Esta função normaliza palavras (minúsculas, sem acentos e caracteres não alfabéticos),
-    remove stopwords e agrupa diferentes flexões em uma mesma raiz simples. A raiz é
-    definida como os primeiros 6 caracteres da palavra normalizada, o que ajuda a
-    unificar termos como "informacao", "informacoes" e "informativo" na mesma categoria.
+    Regras (desenhadas para qualidade e performance):
+      - Não há correção ortográfica no texto completo.
+      - A normalização ocorre apenas no nível de token, para fins de tagueamento.
+      - Se SPELLCHECK_SCOPE != 'none', cada token candidato é padronizado via pt_BR.dic
+        (lookup em memória; rápido), o que resolve formas sem acento e erros comuns de
+        duplicação de vogais (ex.: 'protecao'→'proteção', 'satisfaação'→'satisfação').
+      - Contagem é "uma vez por resposta" (evita um único respondente dominar o ranking).
 
-    Parâmetros:
-        texts (List[str]): lista de respostas em texto.
-        max_keywords (int): número máximo de palavras‑chave a retornar.
-        min_freq (int): frequência mínima para considerar uma palavra.
-
-    Retorna:
-        List[Dict[str, Any]]: lista de dicionários com chaves 'word' (representante da raiz)
-        e 'count' (frequência dessa raiz).
+    Retorno:
+      List[{'word': <representante legível>, 'count': <freq>, 'root': <chave canônica sem acento>}]
     """
     from collections import Counter
-    root_counter = Counter()
-    representative = {}
+
+    counter = Counter()          # chave canônica (sem acento) -> frequência
+    rep: dict[str, str] = {}     # chave canônica -> melhor forma de exibição
+
+    def better_display(cand: str, cur: str | None) -> bool:
+        if cur is None:
+            return True
+        cand_has = cand != _strip_accents(cand)
+        cur_has = cur != _strip_accents(cur)
+        if cand_has != cur_has:
+            return cand_has and not cur_has
+        # preferir a forma mais longa (tende a ser "completa" vs prefixos/ruídos)
+        if len(cand) != len(cur):
+            return len(cand) > len(cur)
+        return cand < cur
+
     for text in texts:
         if not isinstance(text, str):
             continue
-        # Substituir pontuação por espaços para separar tokens
+
+        # Corrige apenas encoding/mojibake (leve) antes do tagueamento.
+        text = fix_string(text)
+
+        # Manter somente letras e espaços para tokenização.
         clean = re.sub(r'[^A-Za-zÀ-ÿ\s]', ' ', text)
-        seen_roots_in_response = set()
+        seen_in_resp: set[str] = set()
+
         for token in clean.split():
+            # normalização para stopwords e tamanho (ASCII, sem acentos)
             norm = _normalize_token_pt(token)
             if not norm:
                 continue
-            # Ignorar tokens muito curtos e stopwords
             if len(norm) <= 2 or norm in STOPWORDS_PT:
                 continue
-            # Definir raiz como os primeiros 6 caracteres (ou a palavra inteira se menor)
-            root = norm[:6]
-            # Adicionar ao conjunto para contar apenas uma vez por resposta
-            seen_roots_in_response.add(root)
-            # Guardar um representante legível para essa raiz (primeiro encontrado ou
-            # lexicograficamente menor).  O representante ajuda a exibir a palavra
-            # numa forma compreensível para o usuário.
-            if root not in representative or representative[root] > norm:
-                representative[root] = norm
-        # Após processar todos os tokens da resposta, incremente contadores uma vez por root
-        for root in seen_roots_in_response:
-            root_counter[root] += 1
-    # Filtrar raízes por frequência mínima
-    frequent_roots = [(root, cnt) for root, cnt in root_counter.items() if cnt >= min_freq]
-    # Ordenar por frequência descrescente e, em caso de empate, pela palavra representante
-    frequent_roots.sort(key=lambda x: (-x[1], representative[x[0]]))
-    # Limitar ao número máximo de palavras‑chave
+
+            # forma "legível" do token (mantém diacríticos)
+            display = fix_string(token).strip().lower()
+            display = unicodedata.normalize('NFC', display)
+            display = re.sub(r"[^A-Za-zÀ-ÿ'\-]+", "", display)
+            if not display:
+                continue
+
+            # padronização opcional SOMENTE para keyword
+            if SPELLCHECK_SCOPE != 'none':
+                cand = _correct_keyword_with_dic(display)
+            else:
+                cand = _collapse_repeated_vowels_display(display)
+
+            cand = unicodedata.normalize('NFC', cand)
+            key = _strip_accents(cand)
+            if not key:
+                continue
+            if key in STOPWORDS_PT:
+                continue
+
+            # contar apenas uma vez por resposta
+            if key in seen_in_resp:
+                continue
+            seen_in_resp.add(key)
+
+            counter[key] += 1
+            if better_display(cand, rep.get(key)):
+                rep[key] = cand
+
+    items = [(k, c) for k, c in counter.items() if c >= min_freq]
+    items.sort(key=lambda x: (-x[1], rep.get(x[0], x[0])))
+
     keywords = []
-    for root, cnt in frequent_roots[:max_keywords]:
-        rep_word = representative[root]
-        keywords.append({'word': rep_word, 'count': cnt, 'root': root})
+    for k, c in items[:max_keywords]:
+        keywords.append({'word': rep.get(k, k), 'count': c, 'root': k})
+
     return keywords
 
 # ========== FUNÇÕES AUXILIARES PARA EVITAR ERRO hashable ==========
@@ -444,26 +880,42 @@ def get_mr1_label(meta, col):
 
 def get_mr2_label(valabs, col, val):
     """
-    Obtém o texto da categoria diretamente do value label
-    (MR categórica real).
-    """
-    vmap = valabs.get(col, {})
-    label = vmap.get(val)
+    Obtém o texto da categoria para MR categórica / por slots.
 
-    if label:
-        return str(label).strip()
+    - Primeiro tenta usar value labels (com lookup robusto).
+    - Se não houver label e o valor já for texto (banco em modo "slot textual"),
+      retorna o próprio valor.
+    """
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+
+    # Tentar value label (robusto contra 1 vs 1.0 vs "1")
+    label = safe_value_label_lookup(valabs, col, val)
+    # safe_value_label_lookup devolve o próprio value se não encontrar label.
+    if isinstance(label, str):
+        lbl = label.strip()
+        # Se o lookup achou algo realmente descritivo, retorna.
+        if lbl and lbl != str(val).strip():
+            return lbl
+
+    # Se o valor já é string descritiva, usar como categoria
+    if isinstance(val, str):
+        v = val.strip()
+        if v and v not in ("99", ".", "NA", "na", "N/A", "n/a", "-"):
+            return v
 
     return None  # deixa o fallback lidar com isso
 
 def mr_is_selected(val, valmap):
     """
-    Retorna True se a opção de múltipla resposta foi marcada, 
+    Retorna True se a opção de múltipla resposta binária foi marcada,
     independente se o SPSS usou:
     - 1 / 0
     - "1" / "0"
     - Yes / No
+    - Sim / Não
     - Selected / Not Selected
-    - Rotulagem invertida
+    - Rotulagem invertida (via value label)
     """
     # Nada selecionado ou valor nulo
     if val is None or (isinstance(val, float) and pd.isna(val)):
@@ -475,9 +927,73 @@ def mr_is_selected(val, valmap):
     if sval in {"1", "1.0", "01"}:
         return True
 
-    # Caso 2 – SPSS exportou "Yes" diretamente como valor
-    if sval in {"yes", "sim", "selected"}:
+    # Caso 2 – SPSS exportou texto diretamente como valor
+    if sval in {"yes", "sim", "selected", "selecionado", "true", "checked", "marcado"}:
         return True
+
+    # Caso 3 – usar value label se existir (resolve codificações invertidas)
+    try:
+        if isinstance(valmap, dict) and valmap:
+            # tentar lookup direto e por string
+            lbl = None
+            if val in valmap:
+                lbl = valmap.get(val)
+            elif sval in valmap:
+                lbl = valmap.get(sval)
+            else:
+                # tentar como número
+                try:
+                    f = float(sval)
+                    if f in valmap:
+                        lbl = valmap.get(f)
+                    if int(f) in valmap:
+                        lbl = valmap.get(int(f))
+                except Exception:
+                    pass
+
+            if lbl is not None:
+                slbl = str(lbl).strip().lower()
+                if slbl in {"yes", "sim", "selected", "selecionado", "true", "checked", "marcado"}:
+                    return True
+                if slbl in {"no", "não", "nao", "not selected", "não selecionado", "nao selecionado", "false", "unchecked"}:
+                    return False
+    except Exception:
+        pass
+
+    return False
+
+
+def mr_is_filled(val, valmap=None):
+    """
+    Para MR por slots (categórica): considera 'selecionado' quando a célula está preenchida
+    com um código válido ou texto válido.
+
+    Regras:
+    - Missing/NaN/vazio → não selecionado
+    - Strings '.', '99', 'N/A', '-' → não selecionado
+    - Se houver value label e ele for explicitamente "Not selected"/"Não selecionado" → não selecionado
+    """
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return False
+
+    # Texto
+    if isinstance(val, str):
+        v = val.strip()
+        if not v or v in ("99", ".", "NA", "na", "N/A", "n/a", "-"):
+            return False
+        return True
+
+    # Numérico: normalmente qualquer número é seleção, exceto quando rotulado como não selecionado
+    try:
+        if isinstance(valmap, dict) and valmap:
+            lbl = safe_value_label_lookup({"__tmp__": valmap}, "__tmp__", val)
+            slbl = str(lbl).strip().lower() if lbl is not None else ""
+            if slbl in {"not selected", "não selecionado", "nao selecionado", "unselected"}:
+                return False
+    except Exception:
+        pass
+
+    return True
 
 # ========== TRADUÇÃO E NORMALIZAÇÃO DE LABELS ==========
 
@@ -596,231 +1112,761 @@ def detect_binary_indicators_improved(labels_dict: Dict) -> bool:
     
     return False
 
+# ========== SISTEMA DE DETECÇÃO MR UNIVERSAL v7.0 ==========
+
+class UniversalMRDetector:
+    """
+    Detector MR universal que funciona em qualquer pesquisa SPSS.
+    Baseado em princípios estruturais, não casos específicos.
+    """
+    
+    def __init__(self, config=None):
+        """Configuração flexível para diferentes tipos de pesquisa."""
+        self.config = config or {
+            'min_group_size': 2,
+            'label_similarity_threshold': 0.7,
+            'related_suffixes': {
+                # Sufixos que indicam variáveis relacionadas (mesmo grupo)
+                'medical': ['ass', 'assist', 'med', 'medic', 'saude'],
+                'other': ['other', 'outro', 'outra', 'outros', 'outras'],
+                'text': ['text', 'txt', 'open', 'aberta'],
+                'scale': ['esc', 'scale', 'escala']
+            }
+        }
+    
+    def parse_variable_structure(self, var_name: str) -> Dict:
+        """Analisa estrutura da variável de forma universal."""
+        patterns = [
+            # Tipo 1: PREFIX_SUB_ITEM_SUFFIX (ex: P4_1_1_other)
+            {
+                'regex': r'^([A-Za-z][A-Za-z0-9]*)_(\d+)_(\d+)_(.+)$',
+                'groups': ('base', 'subgroup', 'item', 'suffix'),
+                'type': 'hierarchical_with_suffix'
+            },
+            # Tipo 2: PREFIX_SUB_ITEM (ex: P4_1_1, P4_2_3) 
+            {
+                'regex': r'^([A-Za-z][A-Za-z0-9]*)_(\d+)_(\d+)$',
+                'groups': ('base', 'subgroup', 'item', None),
+                'type': 'hierarchical'
+            },
+            # Tipo 3: PREFIX_ITEM_SUFFIX (ex: P3_1_ass, P3_6_other)
+            {
+                'regex': r'^([A-Za-z][A-Za-z0-9]*)_(\d+)_(.+)$',
+                'groups': ('base', None, 'item', 'suffix'),
+                'type': 'flat_with_suffix'
+            },
+            # Tipo 4: PREFIX_ITEM (ex: P3_1, Q5_2)
+            {
+                'regex': r'^([A-Za-z][A-Za-z0-9]*)_(\d+)$',
+                'groups': ('base', None, 'item', None),
+                'type': 'flat'
+            },
+            # Tipo 5: PREFIXSUFFIX_ITEM (ex: P3A_1, Q5B_2)
+            {
+                'regex': r'^([A-Za-z][A-Za-z0-9]*[A-Za-z])_(\d+)$',
+                'groups': ('base', None, 'item', None),
+                'type': 'embedded_suffix'
+            }
+        ]
+        
+        for pattern in patterns:
+            match = re.match(pattern['regex'], var_name)
+            if match:
+                groups = match.groups()
+                
+                result = {
+                    'base': groups[0] if groups[0] else '',
+                    'subgroup': groups[1] if len(groups) > 1 and groups[1] else '',
+                    'item': groups[2] if len(groups) > 2 and groups[2] else '',
+                    'suffix': groups[3] if len(groups) > 3 and groups[3] else '',
+                    'pattern_type': pattern['type'],
+                    'original': var_name
+                }
+                
+                result['full_base'] = self.determine_grouping_base(result)
+                return result
+        
+        # Não matched - variável standalone
+        return {
+            'base': var_name, 'subgroup': '', 'item': '', 'suffix': '',
+            'full_base': var_name, 'pattern_type': 'standalone', 'original': var_name
+        }
+    
+    def determine_grouping_base(self, structure: Dict) -> str:
+        """Determina a base de agrupamento baseada na estrutura."""
+        base = structure['base']
+        subgroup = structure['subgroup']  
+        suffix = structure['suffix']
+        original = structure['original']
+        
+        # CORREÇÃO: Variáveis "other" devem ficar STANDALONE 
+        # para serem processadas separadamente como keywords
+        if 'other' in suffix.lower() or 'other' in original.lower():
+            return f"standalone_{original}"  # Força a ficar standalone
+        
+        # Para padrões hierárquicos, incluir subgroup na base
+        if structure['pattern_type'] in ['hierarchical', 'hierarchical_with_suffix']:
+            return f"{base}_{subgroup}" if subgroup else base
+        
+        # Para padrões planos, verificar se suffix é separador
+        elif structure['pattern_type'] in ['flat_with_suffix', 'flat']:
+            if suffix and self.is_separating_suffix(suffix):
+                return f"{base}_{suffix}"
+            else:
+                return base
+        else:
+            return base
+    
+    def is_separating_suffix(self, suffix: str) -> bool:
+        """Determina se um sufixo separa em grupo diferente."""
+        suffix_lower = suffix.lower()
+        
+        # Sufixos que MANTÊM no mesmo grupo (relacionados)
+        related_suffixes = []
+        for category, suffixes in self.config['related_suffixes'].items():
+            related_suffixes.extend(suffixes)
+        
+        for related in related_suffixes:
+            if related in suffix_lower:
+                return False  # Não separa, mantém no mesmo grupo
+        
+        return True  # Se não é relacionado, assume que separa
+    
+    def group_variables(self, selected_vars: List[str], df) -> Tuple[Dict[str, List[str]], List[str], Dict]:
+        """Agrupa variáveis usando análise estrutural universal."""
+        print("\n🔍 === AGRUPAMENTO ESTRUTURAL UNIVERSAL ===")
+        
+        groups = defaultdict(list)
+        standalone = []
+        structures = {}
+        
+        for var in selected_vars:
+            if var not in df.columns:
+                print(f"⚠️ {var} não encontrada")
+                continue
+            
+            structure = self.parse_variable_structure(var)
+            structures[var] = structure
+            
+            full_base = structure['full_base']
+            
+            if structure['pattern_type'] == 'standalone':
+                standalone.append(var)
+                print(f"   {var} → standalone ({structure['pattern_type']})")
+            else:
+                groups[full_base].append(var)
+                print(f"   {var} → {full_base} ({structure['pattern_type']})")
+        
+        # Filtrar grupos pequenos
+        valid_groups = {}
+        for base, vars_list in groups.items():
+            if len(vars_list) >= self.config['min_group_size']:
+                valid_groups[base] = sorted(vars_list)
+            else:
+                standalone.extend(vars_list)
+                print(f"   {base} → muito pequeno, movendo para standalone")
+        
+        print(f"\n📊 Grupos válidos: {len(valid_groups)}")
+        for base, vars_list in valid_groups.items():
+            print(f"   {base}: {vars_list}")
+        print(f"📋 Standalone: {len(standalone)}")
+        
+        return valid_groups, standalone, structures
+    
+    def analyze_group_semantics(self, vars_list: List[str], structures: Dict, meta, df) -> Dict:
+        """Analisa semântica do grupo para classificação MR.
+
+        IMPORTANTE (v7.1):
+        - Evita falso positivo de MR em baterias de escala (ex.: IM03A_6, IM03A_7),
+          onde a maioria dos respondentes responde quase todos os itens.
+        """
+        print(f"\n🔍 Análise semântica: {vars_list}")
+
+        # Extrair variable labels
+        variable_labels = self.extract_variable_labels(vars_list, meta)
+
+        # Calcular similaridade semântica
+        similarity = self.calculate_semantic_similarity(variable_labels)
+
+        # Verificar consistência de value labels
+        value_consistency = self.check_value_labels_consistency(vars_list, meta)
+
+        # Detectar padrão de MR checkbox (0/1)
+        checkbox_mr = self.detect_checkbox_mr(vars_list, meta)
+
+        # Detectar bateria binária "polar" (ex.: 1="Acessou" / 2="Não acessou", 1="Sim"/2="Não")
+        # IMPORTANTE:
+        # - Apesar de serem binárias e frequentemente sequenciais no Name, essas baterias NÃO são MR (múltipla resposta)
+        #   no sentido de "marque tudo que se aplica"; são itens independentes.
+        # - Para MR checkbox legítimo, o SPSS costuma usar 0/1 com labels "Not Selected/Selected" (ou variações).
+        polar_binary = self.detect_polar_binary_battery(vars_list, meta)
+
+        # Analisar padrão estrutural
+        pattern_analysis = self.analyze_structural_pattern(vars_list, structures)
+
+        # Perfil do grupo (densidade / cardinalidade) para diferenciar MR vs bateria
+        profile = self.compute_group_profile(vars_list, meta, df)
+
+        print(f"   📋 Similaridade de labels: {similarity:.2f}")
+        print(f"   📋 Value labels consistentes: {value_consistency}")
+        print(f"   📋 Padrão checkbox (0/1): {checkbox_mr}")
+        print(f"   📋 Bateria binária polar (Sim/Não, Acessou/Não acessou): {polar_binary}")
+        print(f"   📋 Padrão estrutural: {pattern_analysis}")
+        if profile:
+            print(f"   📋 Densidade média preenchida: {profile.get('avg_fill_ratio', 0):.2f}")
+            print(f"   📋 Mediana de categorias (dados): {profile.get('median_unique', 0)}")
+            print(f"   📋 Mediana de categorias (labels): {profile.get('median_vlabel_count', 0)}")
+
+        # Classificação semântica (com guarda para bateria)
+        mr_type = self.classify_semantically(
+            similarity,
+            value_consistency,
+            pattern_analysis,
+            checkbox_mr=checkbox_mr,
+            polar_binary=polar_binary,
+            avg_fill_ratio=profile.get('avg_fill_ratio'),
+            median_unique=profile.get('median_unique'),
+            median_vlabel_count=profile.get('median_vlabel_count')
+        )
+
+        return {
+            'mr_type': mr_type,
+            'similarity': similarity,
+            'value_consistency': value_consistency,
+            'pattern_analysis': pattern_analysis,
+            'variable_labels': variable_labels,
+            'profile': profile,
+            'polar_binary': polar_binary
+        }
+
+    def detect_polar_binary_battery(self, vars_list: List[str], meta) -> bool:
+        """Detecta bateria binária do tipo Sim/Não, Acessou/Não acessou, etc.
+
+        Heurística:
+        - A maioria das variáveis do grupo tem exatamente 2 categorias em value labels;
+        - Os rótulos são do tipo polar (sim/não, yes/no, acessou/não acessou, concorda/não concorda),
+          e NÃO têm semântica explícita de checkbox (selected/not selected).
+
+        Por padrão, tratamos esses grupos como variáveis independentes (NÃO MR),
+        para evitar colapso de baterias como SV12_* e SV13_*.
+        """
+        if not hasattr(meta, 'variable_value_labels'):
+            return False
+        vvl = meta.variable_value_labels or {}
+        ok = 0
+        total = 0
+
+        def _norm(s: str) -> str:
+            return re.sub(r"\s+", " ", str(s).strip().lower())
+
+        # Tokens típicos de polaridade (PT/EN) — intencionalmente conservador
+        yes_tokens = ["sim", "yes", "acessou", "usa", "utiliza", "concordo", "concorda", "satisfeito", "muito satisfeito"]
+        no_tokens = ["não", "nao", "no", "não acessou", "nao acessou", "não usa", "nao usa", "discordo", "discorda", "insatisfeito", "muito insatisfeito"]
+        # Tokens de checkbox (para excluir):
+        checkbox_tokens = ["selected", "not selected", "selecion", "não selecion", "nao selecion"]
+
+        for var in vars_list:
+            m = vvl.get(var, {}) or {}
+            if not isinstance(m, dict) or not m:
+                continue
+
+            # Considerar apenas casos claramente binários
+            if len(m) != 2:
+                continue
+
+            total += 1
+            labels = [_norm(lab) for lab in m.values()]
+
+            # Excluir semântica de checkbox
+            if any(tok in lab for lab in labels for tok in checkbox_tokens):
+                continue
+
+            # Verificar se temos um par polar (um lado "sim" e outro "não")
+            has_yes = any(any(tok in lab for tok in yes_tokens) for lab in labels)
+            has_no = any(any(tok in lab for tok in no_tokens) for lab in labels)
+            if has_yes and has_no:
+                ok += 1
+
+        if total == 0:
+            return False
+        return (ok / total) >= 0.70
+
+    def compute_group_profile(self, vars_list: List[str], meta, df) -> Dict:
+        """Calcula sinais objetivos para distinguir MR de bateria de escala.
+
+        Heurística:
+        - Baterias (rating grids) tendem a ter alta densidade de preenchimento (quase todos respondem quase todos os itens)
+          e cardinalidade > 2 por item (ex.: 1-4).
+        - MR por slots tende a ter muita ausência (missing) e poucos preenchimentos.
+        """
+        if df is None or not vars_list:
+            return {}
+
+        cols = [c for c in vars_list if c in df.columns]
+        if not cols:
+            return {}
+
+        sub = df[cols]
+
+        # Densidade de preenchimento por respondente
+        try:
+            nonmiss = sub.notna().sum(axis=1)
+            avg_fill_ratio = float(nonmiss.mean() / max(len(cols), 1))
+        except Exception:
+            avg_fill_ratio = None
+
+        # Cardinalidade por item (dados)
+        unique_counts = []
+        for c in cols:
+            try:
+                unique_counts.append(int(sub[c].dropna().nunique()))
+            except Exception:
+                pass
+        unique_counts.sort()
+        median_unique = unique_counts[len(unique_counts)//2] if unique_counts else None
+
+        # Cardinalidade por item (value labels)
+        median_vlabel_count = None
+        try:
+            vvl = getattr(meta, 'variable_value_labels', None)
+            if isinstance(vvl, dict):
+                vlabel_counts = []
+                for c in cols:
+                    m = vvl.get(c, {}) or {}
+                    if isinstance(m, dict) and m:
+                        vlabel_counts.append(len(m))
+                vlabel_counts.sort()
+                median_vlabel_count = vlabel_counts[len(vlabel_counts)//2] if vlabel_counts else None
+        except Exception:
+            pass
+
+        return {
+            'avg_fill_ratio': avg_fill_ratio,
+            'median_unique': median_unique,
+            'median_vlabel_count': median_vlabel_count
+        }
+
+    def extract_variable_labels(self, vars_list: List[str], meta) -> List[str]:
+        """Extrai variable labels de forma robusta."""
+        labels = []
+        
+        for var in vars_list:
+            label = var  # fallback
+            
+            if hasattr(meta, 'column_names_to_labels') and var in meta.column_names_to_labels:
+                label = meta.column_names_to_labels[var]
+            elif hasattr(meta, 'variable_labels') and var in meta.variable_labels:
+                label = meta.variable_labels[var]
+            
+            labels.append(str(label).strip() if label else var)
+        
+        return labels
+    
+    def calculate_semantic_similarity(self, labels: List[str]) -> float:
+        """Calcula similaridade semântica usando algoritmo de string similarity."""
+        if len(labels) <= 1:
+            return 1.0
+        
+        # Calcular similaridade par a par
+        similarities = []
+        for i in range(len(labels)):
+            for j in range(i + 1, len(labels)):
+                sim = SequenceMatcher(None, labels[i], labels[j]).ratio()
+                similarities.append(sim)
+        
+        return sum(similarities) / len(similarities) if similarities else 0.0
+    
+    def check_value_labels_consistency(self, vars_list: List[str], meta) -> bool:
+        """Verifica consistência de value labels."""
+        if not hasattr(meta, 'variable_value_labels'):
+            return False
+        
+        value_labels_map = meta.variable_value_labels
+        reference = None
+        
+        for var in vars_list:
+            var_labels = value_labels_map.get(var, {})
+            if not var_labels:
+                continue
+                
+            if reference is None:
+                reference = var_labels
+            elif var_labels != reference:
+                return False
+        
+        return reference is not None
+
+    def detect_checkbox_mr(self, vars_list: List[str], meta) -> bool:
+        """Detecta MR do tipo checkbox (0/1, Not Selected/Selected).
+
+        Objetivo: capturar blocos como IM4_1_1...IM4_1_12 e IM4_2_...,
+        onde o label de cada item começa com o texto do item (ex.: [Plano de Saúde])
+        e a similaridade de string pode cair, mas estruturalmente é MR.
+        """
+        if not hasattr(meta, 'variable_value_labels'):
+            return False
+
+        vvl = meta.variable_value_labels or {}
+        ok = 0
+        total = 0
+
+        for var in vars_list:
+            m = vvl.get(var, {}) or {}
+            if not isinstance(m, dict) or not m:
+                continue
+            total += 1
+
+            # Normalizar chaves e labels
+            keys = set()
+            labels = []
+            for k, lab in m.items():
+                try:
+                    # pyreadstat pode devolver int/float/str; normalizar para int quando possível
+                    if isinstance(k, (int, float)) and float(k).is_integer():
+                        keys.add(int(k))
+                    else:
+                        keys.add(k)
+                except Exception:
+                    keys.add(k)
+                labels.append(str(lab).strip().lower())
+
+            # Critérios: binário por keys OU por labels típicos
+            is_binary_keys = keys.issubset({0, 1}) and (0 in keys and 1 in keys)
+
+            # Heurística por labels (quando chaves não são numéricas)
+            not_sel = any((('not selected' in l) or ('nao selecion' in l) or ('não selecion' in l)) for l in labels)
+            sel = any(((('selected' in l) and ('not selected' not in l)) or
+                       (('selecion' in l) and ('nao' not in l) and ('não' not in l))) for l in labels)
+
+            if is_binary_keys or (not_sel and sel):
+                ok += 1
+
+        # Exigir evidência suficiente (ex.: a maioria das variáveis tem mapeamento binário)
+        if total == 0:
+            return False
+        return (ok / total) >= 0.70
+    
+    def analyze_structural_pattern(self, vars_list: List[str], structures: Dict) -> str:
+        """Analisa padrão estrutural do grupo."""
+        pattern_types = [structures[var]['pattern_type'] for var in vars_list if var in structures]
+        
+        if not pattern_types:
+            return 'unknown'
+        
+        # Padrão mais comum no grupo
+        from collections import Counter
+        most_common = Counter(pattern_types).most_common(1)[0][0]
+        return most_common
+    
+    def classify_semantically(self, similarity: float, value_consistency: bool, pattern: str,
+                           checkbox_mr: bool = False,
+                           polar_binary: bool = False,
+                           avg_fill_ratio: float | None = None,
+                           median_unique: int | None = None,
+                           median_vlabel_count: int | None = None) -> str:
+        """Classificação semântica universal (v7.1).
+
+        Ajuste principal:
+        - Antes a regra era quase exclusivamente "similaridade alta => MR".
+        - Isso gera falso positivo em baterias de escala onde o texto da pergunta se repete (labels muito parecidos).
+
+        Agora aplicamos uma guarda para classificar como "independent_scales" quando:
+        - a maioria dos respondentes preenche a maioria dos itens do grupo (alta densidade), e
+        - cada item tem 3+ categorias (dados e/ou value labels).
+        """
+        threshold = self.config['label_similarity_threshold']
+
+        # Regra especial: MR checkbox (0/1) deve ser agrupado mesmo com baixa similaridade textual
+        if checkbox_mr:
+            print(f"   📌 Padrão checkbox (0/1) detectado → MR")
+            return 'traditional_mr'
+
+        # Regra especial: bateria binária polar (Sim/Não, Acessou/Não acessou, etc.) NÃO é MR.
+        # Mesmo com similaridade alta do enunciado, são itens independentes e devem permanecer separados.
+        if polar_binary:
+            print(f"   📌 Bateria binária polar detectada → Variáveis independentes (não agrupar como MR)")
+            return 'independent_scales'
+
+
+        # Regra forte (v7.2): se cada item tem 3+ categorias (pelos value labels e/ou pelos dados),
+        # não é MR do tipo múltipla resposta; é bateria/grade (itens de escala/avaliação).
+        # IMPORTANTE: isso vale mesmo quando a bateria é condicional (baixa densidade), para evitar
+        # falso positivo em blocos como SV5_1..SV5_9, SV7_1..SV7_5, etc.
+        try:
+            multi_cat = ((median_unique is not None and median_unique >= 3) or
+                         (median_vlabel_count is not None and median_vlabel_count >= 3))
+            if multi_cat:
+                print(f"   📌 Itens com 3+ categorias (dados/labels) → bateria/escala (não agrupar como MR)")
+                return 'independent_scales'
+        except Exception:
+            pass
+
+
+        # Guarda de bateria/escala (mantida): alta densidade + 3+ categorias por item => NÃO é MR
+        try:
+            dense = (avg_fill_ratio is not None and avg_fill_ratio >= 0.60)
+            multi_cat = ((median_unique is not None and median_unique >= 3) or
+                         (median_vlabel_count is not None and median_vlabel_count >= 3))
+            if dense and multi_cat:
+                print(f"   📌 Guarda bateria: densidade {avg_fill_ratio:.2f} e categorias >=3 → Variáveis independentes")
+                return 'independent_scales'
+        except Exception:
+            pass
+
+        # Regra 1: Alta similaridade = MR tradicional
+        if similarity >= threshold:
+            print(f"   📌 Alta similaridade ({similarity:.2f}) → MR tradicional")
+            return 'traditional_mr'
+
+        # Regra 2: Baixa similaridade = independentes
+        print(f"   📌 Baixa similaridade ({similarity:.2f}) → Variáveis independentes")
+        print(f"   📋 Cada variável = uma tabela individual (não agrupar)")
+        return 'independent_scales'
+
+    def detect_mr_groups(self, selected_vars: List[str], meta, df) -> Tuple[Dict, List[str]]:
+        """FUNÇÃO PRINCIPAL: Detecção MR universal e estrutural."""
+        print("\n🎯 === DETECÇÃO MR UNIVERSAL (ESTRUTURAL) ===")
+        
+        # 1. Agrupamento estrutural
+        base_groups, standalone, structures = self.group_variables(selected_vars, df)
+        
+        # 2. Análise semântica de cada grupo
+        mr_groups = {}
+        final_standalone = list(standalone)
+        
+        for base_key, vars_list in base_groups.items():
+            analysis = self.analyze_group_semantics(vars_list, structures, meta, df)
+            
+            # 3. Decisão de agrupamento - CORRIGIDA
+            if analysis['mr_type'] == 'traditional_mr':
+                
+                # Gerar título inteligente
+                title = self.generate_intelligent_title(vars_list, analysis)
+                
+                # Criar grupo MR apenas para traditional_mr
+                group_name = f"mr_{base_key.lower().replace('_', '')}"
+                mr_groups[group_name] = {
+                    "title": title,
+                    "members": vars_list,
+                    "mr_subtype": analysis['mr_type'],
+                    "base": base_key,
+                    "analysis": analysis
+                }
+                
+                print(f"   ✅ Grupo MR criado: {group_name} ({analysis['mr_type']})")
+                
+            else:
+                # TUDO MAIS: Manter como variáveis independentes
+                # Inclui 'battery_grid', 'independent_scales', etc.
+                final_standalone.extend(vars_list)
+                print(f"   📋 Mantido como independentes: {base_key} ({analysis['mr_type']})")
+                print(f"   📋 Variáveis: {vars_list}")
+                print(f"   📋 Cada variável = uma tabela individual")
+        
+        print(f"\n📊 RESULTADO UNIVERSAL:")
+        print(f"   Grupos MR: {len(mr_groups)}")
+        print(f"   Variáveis independentes: {len(final_standalone)}")
+        
+        return mr_groups, final_standalone
+
+    def _clean_mr_label_for_title(self, label: str) -> str:
+        """Normaliza labels de itens para extrair o enunciado do bloco.
+
+        Objetivo: evitar que o título do bloco MR herde o "nome do item" (ex.: texto entre colchetes)
+        e fique algo como "[Plano de Saúde] Em que ...".
+
+        Regra: remove APENAS prefixos de item no início do label (entre colchetes) e trims.
+        """
+        if not label:
+            return ""
+        s = str(label).strip()
+        # Remove prefixo do tipo "[ITEM] ..." no início
+        s = re.sub(r'^\s*\[[^\]]+\]\s*', '', s).strip()
+        # Remove prefixos comuns de numeração (ex.: "1) ", "1. ", "- ")
+        s = re.sub(r'^\s*(?:\d+\)|\d+\.|\-|•)\s*', '', s).strip()
+        return s
+
+    def _common_prefix_by_words(self, strings):
+        """Retorna um prefixo comum por palavras (mais robusto que commonprefix por caracteres)."""
+        toks = [re.split(r'\s+', s.strip()) for s in strings if s and s.strip()]
+        if not toks:
+            return ""
+        min_len = min(len(t) for t in toks)
+        out = []
+        for i in range(min_len):
+            w = toks[0][i]
+            if all(t[i] == w for t in toks[1:]):
+                out.append(w)
+            else:
+                break
+        return " ".join(out).strip()
+
+    def generate_intelligent_title(self, vars_list: List[str], analysis: Dict) -> str:
+        """Gera título do bloco (MR ou grupo) evitando "colagens" de itens.
+
+        Estratégia:
+        - Para MR: limpar prefixos de item (ex.: colchetes) e extrair enunciado comum.
+        - Para demais: manter comportamento legado.
+        """
+        labels = analysis.get('variable_labels', []) or []
+        mr_type = analysis.get('mr_type') or analysis.get('mr_subtype')
+
+        if not labels:
+            base = vars_list[0].split('_')[0] if vars_list else 'Grupo'
+            return f"Grupo {base}"
+
+        # Para MR (traditional_mr / binary / checkbox), remover prefixos de item e tentar achar enunciado comum
+        if mr_type in ('traditional_mr', 'binary', 'checkbox'):
+            cleaned = [self._clean_mr_label_for_title(l) for l in labels]
+            cleaned = [c for c in cleaned if c]
+            if not cleaned:
+                return str(labels[0]).strip()
+
+            # Primeiro: prefixo comum por palavras (quando o enunciado é idêntico)
+            prefix = self._common_prefix_by_words(cleaned)
+            if len(prefix) >= 20:  # suficiente para ser um título inteligível
+                return prefix
+
+            # Segundo: heurística anterior (usa padrões no primeiro label já limpo)
+            return self.extract_common_part(cleaned)
+
+        # Fallback legado
+        return str(labels[0]).strip()
+
+    
+    def extract_common_part(self, labels: List[str], suffix: str = "") -> str:
+        """Extrai parte comum de uma lista de labels."""
+        if len(labels) <= 1:
+            return labels[0] + suffix if labels else "Grupo" + suffix
+        
+        first = labels[0]
+        
+        # Buscar padrões comuns
+        patterns = [
+            r'^(.+?)\s*[-–—]\s*.+',     # "Pergunta - item"
+            r'^(.+?)\s*:\s*.+',         # "Pergunta: item"
+            r'^(.+?)\s*\(.+\)',         # "Pergunta (item)"
+            r'^(.{20,}?)\s+\w+\s*.+',   # Primeiras 20+ chars + uma palavra
+        ]
+        
+        for pattern in patterns:
+            match = re.match(pattern, first)
+            if match:
+                common = match.group(1).strip()
+                if len(common) >= 10:
+                    return common + suffix
+        
+        # Fallback: primeiras palavras  
+        words = first.split()
+        if len(words) >= 2:
+            return " ".join(words[:2]) + "..." + suffix
+        
+        return first + suffix
+
 # ========== NOVA DETECÇÃO DE GRUPOS MR (CORRIGIDA) ==========
 
 def detect_mr_groups_improved(selected_vars: List[str], meta, df) -> Tuple[Dict[str, Dict], List[str]]:
     """
-    VERSÃO CORRIGIDA: Detecta grupos de múltipla resposta de forma mais robusta.
+    VERSÃO 7.0 UNIVERSAL: Detecta grupos de múltipla resposta usando princípios estruturais.
     
-    Retorna:
-        - mr_groups: dicionário com grupos MR detectados
-        - standalone_vars: lista de variáveis independentes
+    Esta função agora usa o UniversalMRDetector que funciona com qualquer base SPSS
+    de qualquer tipo de pesquisa, baseado em princípios estruturais universais.
     """
     
-    print("\n🔍 === DETECTANDO GRUPOS MR (VERSÃO CORRIGIDA) ===")
+    # Configuração padrão (pode ser customizada para diferentes tipos de pesquisa)
+    config = {
+        'min_group_size': 2,
+        'label_similarity_threshold': 0.7,
+        'related_suffixes': {
+            'medical': ['ass', 'assist', 'med', 'medic', 'saude'],
+            'other': ['other', 'outro', 'outra', 'outros', 'outras'],  # IMPORTANTE: other mantém no mesmo grupo
+            'text': ['text', 'txt', 'open', 'aberta'],
+            'scale': ['esc', 'scale', 'escala'],
+            'geographic': ['norte', 'sul', 'leste', 'oeste', 'north', 'south', 'east', 'west']
+        }
+    }
     
-    # Mapear todas as variáveis com padrão BASE_N
-    var_patterns = {}  # base -> [lista de variáveis]
-    standalone_vars = []  # variáveis que não seguem padrão MR
+    # Criar detector universal
+    detector = UniversalMRDetector(config)
     
-    for var in selected_vars:
-        if var not in df.columns:
-            print(f"⚠️ Variável {var} não encontrada no dataset")
-            continue
-            
-        # Testar padrões MR comuns
-        patterns = [
-            r"^([A-Za-z]+\d+_\d+)_(\d+)([A-Za-z]*)$",   # IM4_1_1, IM4_2_10, etc.
-            r"^([A-Za-z]+\d+)_(\d+)([A-Za-z]*)$",       # P01_1, AP05_2, etc.
-            r"^([A-Za-z]+)(\d+)_(\d+)$",                # P1_1, A5_2, etc.
-            r"^([A-Za-z]+\d+[A-Za-z]*)_(\d+)$"          # P01A_1, Q5B_2, etc.
-            r"^([A-Za-z]+\d+)_(\d+)([A-Za-z]*)$",  # P01_1, AP05_2, etc.
-            r"^([A-Za-z]+)(\d+)_(\d+)$",            # P1_1, A5_2, etc.  
-            r"^([A-Za-z]+\d+[A-Za-z]*)_(\d+)$"      # P01A_1, Q5B_2, etc.
-        ]
+    # Executar detecção estrutural
+    mr_groups, standalone = detector.detect_mr_groups(selected_vars, meta, df)
+    
+    # Converter para formato esperado pelo resto do código
+    converted_mr_groups = {}
+    
+    for group_name, group_info in mr_groups.items():
+        # Mapear tipos do sistema universal para tipos esperados
+        mr_subtype_map = {
+            'traditional_mr': 'categorical',
+            # battery_grid removido - não agrupamos mais baterias/grids
+            'independent_scales': 'rating_scale'  # Não deve chegar aqui, mas por segurança
+        }
         
-        matched = False
-        for pattern in patterns:
-            match = re.match(pattern, var)
-            if match:
-                if len(match.groups()) >= 2:
-                    base = match.group(1)
-                    if base not in var_patterns:
-                        var_patterns[base] = []
-                    var_patterns[base].append(var)
-                    print(f"✅ {var} → Grupo {base}")
-                    matched = True
-                    break
-        
-        if not matched:
-            standalone_vars.append(var)
-            print(f"📋 {var} → Variável independente")
-    
-    # Identificar quais bases têm múltiplas variáveis (são realmente MR)
-    mr_groups = {}
-    for base, vars_list in var_patterns.items():
-        if len(vars_list) >= 2:
-            print(f"\n🔗 Analisando possível grupo MR para base {base}: {vars_list}")
-            
-            # Determinar tipo MR (binary/categorical/rating_scale)
-            mr_subtype = detect_mr_type_improved(vars_list, meta, df)
-            print(f"   Tipo detectado: {mr_subtype}")
-            
-            # Se for rating_scale, NÃO agrupar como MR
-            if mr_subtype == "rating_scale":
-                print(f"   🎯 É bateria de escalas, tratando como variáveis individuais")
-                standalone_vars.extend(vars_list)
-                continue
-            
-            # Se chegou aqui, é MR verdadeira
-            print(f"   ✅ Confirmado como múltipla resposta")
-            
-            # Obter título do grupo
-            title = get_mr_group_title(base, vars_list, meta)
-            print(f"   Título: {title}")
-            
-            # Verificar se há variável "_other"
-            other_var = f"{base}_other"
-            group_other = None   # <-- CRUCIAL: garantir que SEMPRE exista
+        original_subtype = group_info.get('mr_subtype', 'categorical')
+        mapped_subtype = mr_subtype_map.get(original_subtype, 'categorical')
 
-            if other_var in df.columns:
-                print(f"   Encontrada variável other: {other_var}")
-                group_other = other_var
-                if other_var not in standalone_vars:
-                    standalone_vars.append(other_var)
+        # Ajuste critico: detectar MR checkbox (0/1) e marcar como 'binary'
+        # Caso contrario, a MR colapsa em categorias 'Selected'/'Not Selected' em vez de itens
+        compat_type = detect_mr_type_improved(group_info.get('members', []), meta, df)
+        if compat_type == 'binary':
+            mapped_subtype = 'binary'
+
         
-            group_name = f"mr_{base.lower()}"
-            mr_groups[group_name] = {
-                "title": title,
-                "members": vars_list,  # PRESERVAR ordem original (removido sorted())
-                "mr_subtype": mr_subtype,
-                "other_var": group_other,
-                "base": base
-            }
-        else:
-            # Se tem só 1 variável, tratar como standalone
-            standalone_vars.extend(vars_list)
-            print(f"📋 {base} tem só 1 variável, tratando como independente")
+        # Verificar se há variável "other"
+        base = group_info.get('base', '')
+        other_var = None
+        
+        # Buscar variável other relacionada (mas NÃO incluir nos membros)
+        other_candidates = [f"{base}_other", f"{base}_outro", f"{base.split('_')[0]}_other"]
+        for candidate in other_candidates:
+            if candidate in df.columns and candidate not in group_info['members']:
+                other_var = candidate
+                # NÃO INCLUIR nos membros - other_var deve ser processada separadamente
+                print(f"   📝 Variável 'other' detectada (separada): {candidate}")
+                break
+        
+        converted_mr_groups[group_name] = {
+            "title": group_info['title'],
+            "members": group_info['members'],  # SEM incluir other_var
+            "mr_subtype": mapped_subtype,
+            "other_var": other_var,  # Referência separada para processamento
+            "base": base
+        }
     
-    print(f"\n📊 RESULTADO:")
-    print(f"   Grupos MR criados: {len(mr_groups)}")
-    print(f"   Variáveis independentes: {len(standalone_vars)}")
+    print(f"\n📊 CONVERSÃO PARA FORMATO LEGADO:")
+    print(f"   Grupos MR convertidos: {len(converted_mr_groups)}")
+    print(f"   Variáveis standalone: {len(standalone)}")
     
-    # Identificar escalas que foram separadas
-    scale_groups = 0
-    for base, vars_list in var_patterns.items():
-        if len(vars_list) >= 2:
-            subtype = detect_mr_type_improved(vars_list, meta, df)
-            if subtype == "rating_scale":
-                scale_groups += 1
-    
-    if scale_groups > 0:
-        print(f"   🎯 Baterias de escalas detectadas: {scale_groups} (tratadas como variáveis individuais)")
-    
-    return mr_groups, standalone_vars
+    return converted_mr_groups, standalone
 
 def detect_mr_type_improved(group_vars: List[str], meta, df) -> str:
     """
-    VERSÃO MELHORADA: Detecta se é MR binary (0/1), categorical ou rating scale.
+    VERSÃO 7.0 COMPATÍVEL: Mantida para compatibilidade com código legado.
     
-    NOVIDADES:
-    - Detecta Yes/No, Sim/Não como binário
-    - Traduz automaticamente quando possível
-    - Trata códigos NSA, N/A adequadamente
+    O sistema universal já faz a classificação correta, mas esta função
+    é mantida para evitar quebras em outras partes do código.
     """
     
-    # 1. Verificar value labels para detectar escalas primeiro
+    # Para grupos detectados pelo sistema universal, simplesmente retornar categorical
+    # pois a classificação real já foi feita pelo UniversalMRDetector
+    
     valabs = get_value_labels_map(meta)
     
+    # Detecção básica para compatibilidade
     if group_vars and group_vars[0] in valabs:
         first_var_labels = valabs[group_vars[0]]
         
-        # Aplicar tradução/normalização
-        normalized_labels = normalize_and_translate_labels(first_var_labels)
-        
-        # Verificar se é escala de avaliação (padrão comum)
-        scale_patterns = {
-            # Escalas de satisfação
-            r'(muito\s+)?insatisfeit|satisfeit|indiferente': 'satisfaction_scale',
-            # Escalas de concordância  
-            r'discord|concord|neutro': 'agreement_scale',
-            # Escalas numéricas (1-5, 1-10, etc.)
-            r'^[1-9]\d*$': 'numeric_scale',
-            # Escalas de frequência
-            r'sempre|frequente|raramente|nunca': 'frequency_scale',
-            # Escalas de qualidade
-            r'(muito\s+)?bom|ruim|regular|ótimo|péssimo': 'quality_scale'
-        }
-        
-        label_text = ' '.join(normalized_labels.values()).lower()
-        
-        for pattern, scale_type in scale_patterns.items():
-            if re.search(pattern, label_text):
-                print(f"   🎯 Detectado como ESCALA ({scale_type}), não MR")
-                return "rating_scale"
-        
-        # Verificar se os values formam uma sequência numérica (escala)
-        try:
-            numeric_values = []
-            for val in normalized_labels.keys():
-                try:
-                    num = float(val)
-                    if num not in [99, 999, 0]:  # Excluir códigos de missing
-                        numeric_values.append(int(num))
-                except:
-                    pass
+        # Se tem poucas opções e são binárias, assumir binary
+        if len(first_var_labels) <= 2:
+            unique_values = set()
+            for var in group_vars:
+                if var in df.columns:
+                    unique_values.update(df[var].dropna().unique())
             
-            if len(numeric_values) >= 3:  # Tem pelo menos 3 valores na escala
-                numeric_values.sort()
-                # Verificar se é sequencial (1,2,3,4,5 ou similar)
-                if numeric_values == list(range(min(numeric_values), max(numeric_values) + 1)):
-                    print(f"   🎯 Detectado como ESCALA NUMÉRICA ({min(numeric_values)}-{max(numeric_values)}), não MR")
-                    return "rating_scale"
-        except:
-            pass
+            if unique_values.issubset({0, 1, 0.0, 1.0}):
+                return "binary"
     
-    # 2. Verificar se é MR binária usando detecção melhorada
-    scale_keywords = [
-        "satisfeito", "insatisfeito", "indiferente",
-        "concord", "discord", "neutro",
-        "ótim", "bom", "regular", "ruim", "péssim",
-        "sempre", "nunca", "às vezes"
-    ]
-
-    for var in group_vars:
-        vmap = valabs.get(var, {})
-        labels = " ".join(str(v).lower() for v in vmap.values())
-
-        # ➤ REGRA DEFINITIVA: Se contém palavras de escala → retornar "rating_scale"
-        if any(kw in labels for kw in scale_keywords):
-            print("   🎯 Escala de avaliação detectada — NÃO é MR")
-            return "rating_scale"
-
-    # 3. Só agora testar MR binária
-    for var in group_vars:
-        vmap = valabs.get(var, {})
-        if vmap and detect_binary_indicators_improved(vmap):
-            print("   ✅ Detectado como MR BINÁRIA")
-            return "binary"    
-
-    # 3. Fallback: verificar dados reais (se tem 3+ variáveis com só 0/1)
-    if len(group_vars) >= 3:
-        all_01 = True
-        for var in group_vars:
-            if var in df.columns:
-                series = df[var].dropna()
-                if not series.empty:
-                    unique_vals = {str(v).strip() for v in series.unique()}
-                    # Excluir códigos de missing da análise
-                    unique_vals = unique_vals - {'99', '999', '9999', 'nan', 'None'}
-                    if not unique_vals.issubset({"0", "1", "0.0", "1.0"}):
-                        all_01 = False
-                        break
-        
-        if all_01:
-            print(f"   ✅ Detectado como MR BINÁRIA (pelos dados)")
-            return "binary"
-    
-    # 4. Verificar colchetes nos labels (padrão LimeSurvey)
-    for var in group_vars:
-        label = get_var_label(meta, var)
-        if "[" in label and "]" in label:
-            print(f"   ✅ Detectado como MR BINÁRIA (padrão colchetes)")
-            return "binary"
-    
-    print(f"   📊 Detectado como MR CATEGÓRICA")
-    return "categorical"
-
 def get_mr_group_title(base: str, vars_list: List[str], meta) -> str:
     """
     Obtém título do grupo MR, tentando várias estratégias.
@@ -1393,7 +2439,7 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
                 group = mr_groups.get(vname, {})
                 members = group.get("members", [])
                 subtype = group.get("mr_subtype")
-                
+
                 chosen_options: List[str] = []
                 for col in members:
                     val = row.get(col)
@@ -1401,12 +2447,16 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
                         continue
 
                     vmap = valabs.get(col, {})
-                    if not mr_is_selected(val, vmap):
-                        continue
 
                     if subtype == "binary":
+                        # MR binária: precisa estar marcada
+                        if not mr_is_selected(val, vmap):
+                            continue
                         option_text = get_mr1_label(meta, col)
                     else:
+                        # MR por slots/categórica: basta estar preenchido (código ou texto)
+                        if not mr_is_filled(val, vmap):
+                            continue
                         option_text = get_mr2_label(valabs, col, val)
 
                     if not option_text:
@@ -1415,7 +2465,7 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
                         option_text = col
 
                     option_text = str(option_text).strip()
-                    if option_text not in chosen_options:
+                    if option_text and option_text not in chosen_options:
                         chosen_options.append(option_text)
 
                 # Se existir variável de "outros" associada a este grupo,
@@ -1431,7 +2481,7 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
                         if other_text and other_text not in ("99", ".", "NA", "na", "N/A", "n/a", "-"):
                             if "Outros" not in chosen_options:
                                 chosen_options.append("Outros")
-                
+
                 rec[vname] = safe_sorted_unique(chosen_options)
                 continue
             
@@ -1506,6 +2556,15 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
                 texts = [rec.get(vname) for rec in records if rec.get(vname)]
                 if texts:
                     keywords = extract_keywords_from_texts(texts)
+                    # Correção somente nas palavras‑chave (rápido).
+                    # NÃO corrige os textos importados, apenas padroniza o chip de keyword.
+                    if SPELLCHECK_SCOPE != "none":
+                        # Padronização APENAS das palavras-chave (rápido): usa pt_BR.dic carregado uma única vez.
+                        for kw in keywords:
+                            ww = kw.get("word")
+                            if isinstance(ww, str) and ww:
+                                kw["word"] = _correct_keyword_with_dic(ww)
+
                     vm["keywords"] = keywords  # lista de {'word': ..., 'count': ...}
                 else:
                     vm["keywords"] = []
@@ -1592,6 +2651,38 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             width: 100%;
 
             margin-bottom: 0;
+        }}
+        /* Painel de filtros colapsável */
+        .filters-container.collapsed .filters-grid {{
+            display: none;
+        }}
+        .filters-toggle {{
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: #666;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            cursor: pointer;
+        }}
+
+        .filters-toggle:hover {{
+            background: #f0f4f8;
+            color: #333;
+        }}
+
+        .filters-toggle:focus-visible {{
+            outline: 2px solid rgba(74, 144, 226, 0.35);
+            outline-offset: 2px;
+        }}
+
+        .filters-toggle .chev {{
+            font-size: 14px;
+            line-height: 1;
         }}
 
         .content {{
@@ -1898,6 +2989,9 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         <div class="filters-header">
             <h2 class="filter-title">🔍 Filtros de Seleção</h2>
             <div class="filter-actions">
+                <button class="filters-toggle" id="toggleFiltersBtn" onclick="toggleFiltersPanel()" title="Recolher/expandir filtros" aria-label="Recolher/expandir filtros">
+                    <span class="chev" id="toggleFiltersChev">▴</span>
+                </button>
                 <button class="filter-btn apply-btn" onclick="applyFilters()">✓ Aplicar</button>
                 <button class="filter-btn clear-btn" onclick="clearFilters()">🔄 Limpar</button>
                 <button class="filter-btn export-btn" onclick="exportAllTables()">📊 Excel</button>
@@ -1952,11 +3046,44 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         // Estados globais
         let charts = {{}};
 
-        // INICIALIZAÇÃO
+        
+        // Painel de filtros (colapsável)
+        function setFiltersPanelCollapsed(collapsed) {{
+            const panel = document.querySelector('.filters-container');
+            if (!panel) return;
+
+            panel.classList.toggle('collapsed', !!collapsed);
+
+            const chev = document.getElementById('toggleFiltersChev');
+            if (chev) {{
+                chev.textContent = panel.classList.contains('collapsed') ? '▾' : '▴';
+            }}
+        }}
+
+        function toggleFiltersPanel() {{
+            const panel = document.querySelector('.filters-container');
+            if (!panel) return;
+            const next = !panel.classList.contains('collapsed');
+            setFiltersPanelCollapsed(next);
+            try {{
+                localStorage.setItem('filtersCollapsed', next ? '1' : '0');
+            }} catch (e) {{ /* ignore */ }}
+        }}
+
+        function restoreFiltersPanelState() {{
+            let collapsed = false;
+            try {{
+                collapsed = (localStorage.getItem('filtersCollapsed') === '1');
+            }} catch (e) {{ /* ignore */ }}
+            setFiltersPanelCollapsed(collapsed);
+        }}
+
+// INICIALIZAÇÃO
         document.addEventListener('DOMContentLoaded', function() {{
             console.log('🌍 Dashboard SPSS Universal carregado');
             console.log('📊 ' + VARS_META.length + ' variáveis, ' + FILTERS.length + ' filtros, ' + RECORDS.length + ' registros');
             
+            restoreFiltersPanelState();
             buildFilters();
             renderAll();
         }});
@@ -2072,46 +3199,100 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             renderAll();
         }}
 
+        // ===== DRILLDOWN (clique em barras) =====
+        // Regra: AND entre variáveis; OR dentro da variável (multi-seleção)
+        const DRILLDOWN = new Map(); // varName -> Set(rawValue)
+
+        function _norm(v) {{
+            return String(v).trim();
+        }}
+
+        function getDrilldownSet(varName) {{
+            if (!DRILLDOWN.has(varName)) DRILLDOWN.set(varName, new Set());
+            return DRILLDOWN.get(varName);
+        }}
+
+        function toggleDrilldown(varName, rawValue) {{
+            const s = getDrilldownSet(varName);
+            const k = _norm(rawValue);
+
+            if (s.has(k)) s.delete(k);
+            else s.add(k);
+
+            if (s.size === 0) DRILLDOWN.delete(varName);
+            renderAll();
+        }}
+
+        function clearAllDrilldowns() {{
+            DRILLDOWN.clear();
+        }}
+
         function clearFilters() {{
             document.querySelectorAll('.dropdown-content input[type="checkbox"]').forEach(cb => cb.checked = false);
             FILTERS.forEach(f => {{
                 const textElement = document.getElementById(f.name + 'Text');
                 if (textElement) textElement.textContent = 'Todos';
             }});
+            // Limpa também o drilldown por clique nos gráficos
+            clearAllDrilldowns();
             document.querySelectorAll('.dropdown-content').forEach(d => d.classList.remove('show'));
             document.querySelectorAll('.dropdown-button').forEach(b => b.classList.remove('open'));
             renderAll();
         }}
 
-        function getFilteredRecords() {{
+        function getFilteredRecords(excludeVarName = null) {{
             const selectedFilters = getSelectedFilters();
             return RECORDS.filter(record => {{
-                return Object.keys(selectedFilters).every(filterName => {{
+                // 1) filtros do topo
+                const passTop = Object.keys(selectedFilters).every(filterName => {{
                     const filterValues = selectedFilters[filterName];
                     if (filterValues.length === 0) return true;
                     const recordValue = record[filterName];
                     if (recordValue === null || recordValue === undefined) return false;
-                    
-                    // Normalizar valores para comparação
-                    const normalizedRecordValue = String(recordValue).trim();
-                    const normalizedFilterValues = filterValues.map(v => String(v).trim());
-                    
+
+                    const normalizedRecordValue = _norm(recordValue);
+                    const normalizedFilterValues = filterValues.map(v => _norm(v));
                     return normalizedFilterValues.includes(normalizedRecordValue);
                 }});
+
+                if (!passTop) return false;
+
+                // 2) drilldowns por clique em gráficos (AND entre variáveis; OR dentro da variável)
+                for (const [varName, set] of DRILLDOWN.entries()) {{
+                    if (excludeVarName && varName === excludeVarName) continue;
+                    if (!set || set.size === 0) continue;
+
+                    const v = record[varName];
+                    if (v === null || v === undefined) return false;
+
+                    if (Array.isArray(v)) {{
+                        let ok = false;
+                        for (const item of v) {{
+                            if (item === null || item === undefined) continue;
+                            if (set.has(_norm(item))) {{ ok = true; break; }}
+                        }}
+                        if (!ok) return false;
+                    }} else {{
+                        if (!set.has(_norm(v))) return false;
+                    }}
+                }}
+
+                return true;
             }});
         }}
 
         // RENDERIZAÇÃO
         function renderAll() {{
-            const filteredRecords = getFilteredRecords();
+            const filteredRecordsAll = getFilteredRecords(null);
             const content = document.getElementById('content');
             content.innerHTML = '';
             
-            console.log('🔄 Renderizando com ' + filteredRecords.length + ' registros filtrados');
+            console.log('🔄 Renderizando com ' + filteredRecordsAll.length + ' registros filtrados');
             console.log('📋 Ordem das variáveis sendo processadas:', VARS_META.map(v => v.name));
             
             VARS_META.forEach((varMeta, index) => {{
-                const section = createSection(varMeta, filteredRecords);
+                const recordsForVar = getFilteredRecords(varMeta.name);
+                const section = createSection(varMeta, recordsForVar);
                 content.appendChild(section);
             }});
         }}
@@ -2145,8 +3326,9 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             validResponses.sort((a, b) => a.localeCompare(b, 'pt-BR'));
 
             // --------- BLOCO VISUAL (lista normal como antes) ----------
+            const totalResponses = validResponses.length;
             const summary = document.createElement('p');
-            summary.innerHTML = '<strong>Total de respostas:</strong> ' + validResponses.length;
+            summary.innerHTML = '<strong>Total de respostas:</strong> ' + totalResponses;
             summary.style.marginBottom = '15px';
 
             const responseList = document.createElement('div');
@@ -2219,41 +3401,115 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                         .replace(/[\u0300-\u036f]/g, '');
                 }}
 
-                // Função para aplicar filtro nas respostas.
-                // Normaliza tanto o termo pesquisado quanto o texto de cada resposta para
-                // garantir correspondência sem acentuação.
-                function applyKeywordFilter(kw) {{
-                    const normKw = kw ? normalizeForComparison(kw) : null;
+                // ---------------- MULTI-SELEÇÃO (OR) ----------------
+                const selectedRoots = new Set();
+
+                // Contagens dinâmicas das keywords com base nos registros JÁ filtrados no dashboard
+                const _kwCounts = new Map();
+                try {{
+                    const _normResponses = validResponses.map(r => normalizeForComparison(r));
+                    keywords.forEach(k => {{
+                        const rr = normalizeForComparison(k.root);
+                        if (!rr) return;
+                        let c = 0;
+                        for (let i = 0; i < _normResponses.length; i++) {{
+                            if (_normResponses[i].includes(rr)) c++;
+                        }}
+                        _kwCounts.set(k.root, c);
+                    }});
+                }} catch(e) {{
+                    console.warn('kw count erro', e);
+                }}
+
+                // Aplica o filtro com base nas roots selecionadas (OR).
+                // Se nada selecionado, mostra tudo.
+                function applyKeywordMultiFilter() {{
                     const items = responseList.children;
+
+                    if (selectedRoots.size === 0) {{
+                        for (let i = 0; i < items.length; i++) items[i].style.display = '';
+                        summary.innerHTML = '<strong>Total de respostas:</strong> ' + totalResponses;
+                        return;
+                    }}
+
                     for (let i = 0; i < items.length; i++) {{
                         const item = items[i];
                         const text = item.textContent || '';
                         const normText = normalizeForComparison(text);
-                        if (!normKw || normText.includes(normKw)) {{
-                            item.style.display = '';
-                        }} else {{
-                            item.style.display = 'none';
-                        }}
+
+                        let match = false;
+                        selectedRoots.forEach(root => {{
+                            if (normText.includes(root)) match = true;
+                        }});
+
+                        item.style.display = match ? '' : 'none';
                     }}
+
+                    // Atualiza contador conforme itens visíveis
+                    let visible = 0;
+                    for (let i = 0; i < items.length; i++) {{
+                        if (items[i].style.display !== 'none') visible++;
+                    }}
+                    summary.innerHTML = '<strong>Total de respostas:</strong> ' + visible + ' (filtradas de ' + totalResponses + ')';
                 }}
 
+                // Estado inicial: sem keywords selecionadas
+                applyKeywordMultiFilter();
+
+                // Toggle do chip (seleciona/deseleciona)
+                function toggleKeywordRoot(root, el) {{
+                    const normRoot = normalizeForComparison(root);
+
+                    if (selectedRoots.has(normRoot)) {{
+                        selectedRoots.delete(normRoot);
+                        el.classList.remove('kw-active');
+                        el.style.background = '#f1f1f1';
+                        el.style.fontWeight = 'normal';
+                    }} else {{
+                        selectedRoots.add(normRoot);
+                        el.classList.add('kw-active');
+                        el.style.background = '#dbeafe';
+                        el.style.fontWeight = '600';
+                    }}
+
+                    applyKeywordMultiFilter();
+                }}
+
+                // Monta botões
                 keywords.forEach(k => {{
                     const kwBtn = document.createElement('span');
-                    kwBtn.style.cssText = 'padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 12px; background: #f1f1f1;';
-                    kwBtn.textContent = k.word + ' (' + k.count + ')';
-                    // Define tooltip sem usar aspas internas para evitar erros de sintaxe
+                    kwBtn.style.cssText =
+                        'padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; ' +
+                        'cursor: pointer; font-size: 12px; background: #f1f1f1;';
+                    const _c = _kwCounts.get(k.root) ?? k.count ?? 0;
+                    if (_c <= 0) return;
+                    kwBtn.textContent = k.word + ' (' + _c + ')';
                     kwBtn.title = "Filtrar por " + k.word;
-                    // Armazena a raiz normalizada como dataset para o botão
+
                     kwBtn.dataset.root = k.root;
-                    kwBtn.onclick = () => applyKeywordFilter(k.root);
+                    kwBtn.onclick = () => toggleKeywordRoot(k.root, kwBtn);
+
                     filterContainer.appendChild(kwBtn);
                 }});
-                // Botão para limpar filtro.  Usa a mesma paleta do botão "Limpar" do header e inclui ícone.
+
+                // Botão limpar seleções
                 const clearBtn = document.createElement('span');
-                clearBtn.style.cssText = 'padding: 4px 8px; border: 1px solid #b6e0fe; border-radius: 4px; cursor: pointer; font-size: 12px; background: #e9f7fe; color: #0d6efd; display: inline-flex; align-items: center; gap: 4px;';
-                clearBtn.innerHTML = '🔄 <span>Limpar filtros</span>';
-                clearBtn.title = "Remover filtro de palavra‑chave";
-                clearBtn.onclick = () => applyKeywordFilter(null);
+                clearBtn.style.cssText =
+                    'padding: 4px 8px; border: 1px solid #b6e0fe; border-radius: 4px; cursor: pointer; ' +
+                    'font-size: 12px; background: #e9f7fe; color: #0d6efd; display: inline-flex; ' +
+                    'align-items: center; gap: 4px;';
+                clearBtn.innerHTML = '<span>Limpar filtros</span>';
+                clearBtn.title = "Remover filtro de palavra-chave";
+                clearBtn.onclick = () => {{
+                    selectedRoots.clear();
+                    filterContainer.querySelectorAll('span[data-root]').forEach(btn => {{
+                        btn.classList.remove('kw-active');
+                        btn.style.background = '#f1f1f1';
+                        btn.style.fontWeight = 'normal';
+                    }});
+                    applyKeywordMultiFilter();
+                    summary.innerHTML = '<strong>Total de respostas:</strong> ' + totalResponses;
+                }};
                 filterContainer.appendChild(clearBtn);
                 container.appendChild(filterContainer);
             }}
@@ -2593,20 +3849,39 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             chartContainer.appendChild(canvas);
             const ctx = canvas.getContext('2d');
 
+            // Drilldown: chaves 'raw' alinhadas às barras
+            const rawKeys = entries.map(([k]) => _norm(k));
+            const sel = DRILLDOWN.get(varMeta.name) || new Set();
+            const hasSel = sel.size > 0;
+
+            const bgColors = rawKeys.map(k => {{
+                if (!hasSel) return 'rgba(74, 144, 226, 0.7)';
+                return sel.has(k) ? 'rgba(74, 144, 226, 0.85)' : 'rgba(74, 144, 226, 0.20)';
+            }});
+            const borderColors = rawKeys.map(k => {{
+                if (!hasSel) return 'rgba(74, 144, 226, 1)';
+                return sel.has(k) ? 'rgba(74, 144, 226, 1)' : 'rgba(74, 144, 226, 0.35)';
+            }});
+
             new Chart(ctx, {{
                 type: 'bar',
                 data: {{
                     labels: labels.map(label => wrapLabel(label, CHART_LABEL_MAX)),
                     datasets: [{{
                         data: percentages,
-                        backgroundColor: 'rgba(74, 144, 226, 0.7)',
-                        borderColor: 'rgba(74, 144, 226, 1)',
+                        backgroundColor: bgColors,
+                        borderColor: borderColors,
                         borderWidth: 1
                     }}]
                 }},
                 options: {{
                     responsive: true,
                     maintainAspectRatio: false,
+                    onClick: function(evt, elements) {{
+                        if (!elements || elements.length === 0) return;
+                        const idx = elements[0].index;
+                        toggleDrilldown(varMeta.name, rawKeys[idx]);
+                    }},
                     plugins: {{
                         legend: {{ display: false }},
                         tooltip: {{
@@ -2776,9 +4051,12 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 }});
 
                 // Criar aba
+                const activeFilters = getActiveFiltersDescription();
+
                 const ws = XLSX.utils.aoa_to_sheet([
                     [title],
-                    [""],
+                    [activeFilters.length ? ('Filtros aplicados: ' + activeFilters.join(' | ')) : 'Filtros aplicados: Nenhum'],
+                    [],
                     ...rows
                 ]);
 
@@ -2807,13 +4085,14 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         function getActiveFiltersDescription() {{
             const selectedFilters = getSelectedFilters();
             const activeFilters = [];
-            
+
+            // 1) filtros do topo
             Object.keys(selectedFilters).forEach(filterName => {{
                 const filterValues = selectedFilters[filterName];
                 if (filterValues.length > 0) {{
                     const filterMeta = FILTERS.find(f => f.name === filterName);
                     const filterTitle = filterMeta ? filterMeta.title : filterName;
-                    
+
                     if (filterValues.length === 1) {{
                         activeFilters.push(`${{filterTitle}}: ${{filterValues[0]}}`);
                     }} else {{
@@ -2821,7 +4100,27 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     }}
                 }}
             }});
-            
+
+            // 2) drilldowns por clique (categorias selecionadas nas barras)
+            for (const [varName, set] of DRILLDOWN.entries()) {{
+                if (!set || set.size === 0) continue;
+                const varMeta = VARS_META.find(v => v.name === varName);
+                const varTitle = varMeta ? varMeta.title : varName;
+
+                const rawVals = Array.from(set);
+                const prettyVals = rawVals.map(rv => {{
+                    const v = String(rv).trim();
+                    if (CODE_TO_LABEL[varName] && CODE_TO_LABEL[varName][v]) return CODE_TO_LABEL[varName][v];
+                    return v;
+                }});
+
+                if (prettyVals.length === 1) {{
+                    activeFilters.push(`${{varTitle}} (drilldown): ${{prettyVals[0]}}`);
+                }} else {{
+                    activeFilters.push(`${{varTitle}} (drilldown): ${{prettyVals.length}} selecionados`);
+                }}
+            }}
+
             return activeFilters.length > 0 ? activeFilters : ['Nenhum filtro aplicado'];
         }}
 
@@ -3107,6 +4406,12 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
 def run_gui() -> int:
     """Interface gráfica CORRIGIDA - exportselection=False é a chave"""
+    # Spellcheck: deliberadamente desabilitado para textos importados.
+    # Keywords são padronizadas via pt_BR.dic (lazy) em _correct_keyword_with_dic().
+    if not GUI_AVAILABLE:
+        print("❌ ERRO: tkinter não disponível!")
+        print("🖥️ tkinter é necessário para a interface gráfica")
+        return 1
     try:
         # 1. SELEÇÃO DO ARQUIVO
         root = tk.Tk()
@@ -3586,6 +4891,8 @@ def run_cli() -> int:
     args = p.parse_args()
 
     try:
+        # Spellcheck: deliberadamente desabilitado para textos importados.
+        # Keywords são padronizadas via pt_BR.dic (lazy) em _correct_keyword_with_dic().
         df, meta = read_sav_auto(args.input)
         fix_labels_in_meta(meta)
         
