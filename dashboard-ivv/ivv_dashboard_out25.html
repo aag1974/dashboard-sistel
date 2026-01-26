@@ -1,0 +1,2142 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard IVV - Apresentação Executiva</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #478DDC 0%, #2c5aa0 100%);
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .nav-bar {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .nav-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .nav-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .nav-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .nav-btn.active {
+            background: #27ae60;
+            box-shadow: 0 5px 15px rgba(39,174,96,0.3);
+        }
+        
+        .section {
+            display: none;
+        }
+        
+        .section.active {
+            display: block;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+            padding: 30px 0;
+            position: relative;
+        }
+        
+        .header-content {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 30px;
+            padding: 0 40px;
+        }
+        
+        .logo {
+            height: 100px;
+            width: auto;
+            filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3)) drop-shadow(0px 0px 8px rgba(255,255,255,0.8));
+            flex-shrink: 0;
+        }
+        
+        .header-text {
+            flex-grow: 1;
+            text-align: center;
+        }
+        
+        .month-ref {
+            position: absolute;
+            top: 20px;
+            right: 40px;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            backdrop-filter: blur(10px);
+        }
+        
+        .chart-title {
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            color: #2c3e50;
+            text-align: center;
+            font-weight: 600;
+        }
+        
+        .chart-subtitle {
+            font-size: 1em;
+            color: #7f8c8d;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .chart-wrapper {
+            position: relative;
+            height: 400px;
+            margin-bottom: 20px;
+        }
+        
+        .chart-wrapper.small {
+            height: 300px;
+        }
+        
+        .insights {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            border-left: 5px solid #3498db;
+        }
+        
+        .insights h4 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .insights ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        
+        .insights li {
+            padding: 5px 0;
+            color: #555;
+        }
+        
+        .insights li:before {
+            content: "▸ ";
+            color: #3498db;
+            font-weight: bold;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .chart-container {
+                padding: 20px;
+            }
+        }
+        
+        .highlight-box {
+            background: linear-gradient(45deg, #27ae60, #2ecc71);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .highlight-box h3 {
+            font-size: 1.5em;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="month-ref">📅 Mês Ref.: Out/25</div>
+            <div class="header-content">
+                <img src="logo.png" alt="Opinião Logo" class="logo">
+                <div class="header-text">
+                    <h1>📊 Pesquisa IVV Residencial</h1>
+                    <p>Índice de Velocidade de Vendas - Análise Executiva</p>
+                    <small>Relatório gerado em: 16/12/2025</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Barra de Navegação -->
+        <div class="nav-bar">
+            <div class="nav-buttons">
+                <button class="nav-btn active" onclick="showSection('ivv')">📈 IVV</button>
+                <button class="nav-btn" onclick="showSection('ofertas')">🏢 Ofertas</button>
+                <button class="nav-btn" onclick="showSection('vendas')">💰 Vendas</button>
+                <button class="nav-btn" onclick="showSection('lancamentos')">🚀 Lançamentos</button>
+                <button class="nav-btn" onclick="showSection('precos')">💲 Preços</button>
+                <button class="nav-btn" onclick="showSection('vgv')">📊 VGV</button>
+                <button class="nav-btn" onclick="showSection('sintese')">🎯 Síntese Out/25</button>
+            </div>
+        </div>
+
+        <!-- Seção IVV -->
+        <div id="ivv" class="section active">
+            <!-- IVV Mensal -->
+            <div class="chart-container">
+                <div class="chart-title">IVV Mensal - Evolução 2021-2025</div>
+                <div class="chart-subtitle">Variação mensal do Índice de Velocidade de Vendas (%)</div>
+                <div class="chart-wrapper">
+                    <canvas id="monthlyChart"></canvas>
+                </div>
+                <div class="insights">
+                    <h4>💡 Insights Principais:</h4>
+                    <ul>
+                        <li><strong>2025 YTD:</strong> Recuperação consistente com média de 7,6% (vs 6,9% em 2024)</li>
+                        <li><strong>Pico de Junho 2025:</strong> 10,4% - melhor performance desde março de 2022</li>
+                        <li><strong>Tendência:</strong> Crescimento sustentado de junho a outubro de 2025</li>
+                        <li><strong>Comparativo Out/2025 vs Out/2024:</strong> +48,4% de crescimento</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Grid para Trimestral e Anual -->
+            <div class="grid">
+                <div class="chart-container">
+                    <div class="chart-title">IVV Trimestral</div>
+                    <div class="chart-subtitle">Performance por trimestre (%)</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="quarterlyChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>4T/2025: 9,1%</h3>
+                        <p>Melhor trimestre desde 1T/2021</p>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart-title">IVV Anual</div>
+                    <div class="chart-subtitle">Evolução anual e variações (%)</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="annualChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>2025*: +9,1%</h3>
+                        <p>Segundo ano consecutivo de crescimento</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resumo Executivo -->
+            <div class="chart-container">
+                <div class="chart-title">📈 Resumo Executivo - IVV</div>
+                <div class="insights">
+                    <h4>🎯 Destaques 2025:</h4>
+                    <ul>
+                        <li><strong>Recuperação Sustentada:</strong> IVV anual projetado em 7,6% (+9,1% vs 2024)</li>
+                        <li><strong>Momentum Positivo:</strong> Crescimento trimestral consistente (6,2% → 9,1%)</li>
+                        <li><strong>Performance Out/25:</strong> 48,4% superior vs Out/24</li>
+                        <li><strong>Tendência:</strong> Mercado em recuperação após vale de 2023 (6,2%)</li>
+                    </ul>
+                    
+                    <h4>⚠️ Pontos de Atenção:</h4>
+                    <ul>
+                        <li>Dados de 2025 ainda incompletos (até outubro)</li>
+                        <li>Sazonalidade típica esperada no 4T completo</li>
+                        <li>Base de comparação 2023 ainda 23% abaixo do pico 2021</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Seção Ofertas -->
+        <div id="ofertas" class="section">
+            <!-- Ofertas Mensais -->
+            <div class="chart-container">
+                <div class="chart-title">Ofertas Mensais - Evolução 2021-2025</div>
+                <div class="chart-subtitle">Volume mensal de ofertas (Unidades)</div>
+                <div class="chart-wrapper">
+                    <canvas id="ofertasMonthlyChart"></canvas>
+                </div>
+                <div class="insights">
+                    <h4>💡 Insights Principais:</h4>
+                    <ul>
+                        <li><strong>2025 YTD:</strong> Média de 5.071 unidades/mês (-20,3% vs 2024)</li>
+                        <li><strong>Pico 2024:</strong> Janeiro com 7.533 unidades - maior volume da série</li>
+                        <li><strong>Tendência 2025:</strong> Estabilização em torno de 5.000 unidades/mês</li>
+                        <li><strong>Comparativo Out/25 vs Out/24:</strong> -4,4% de redução</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Grid para Trimestral e Anual -->
+            <div class="grid">
+                <div class="chart-container">
+                    <div class="chart-title">Ofertas Trimestral</div>
+                    <div class="chart-subtitle">Volume por trimestre (Unidades)</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="ofertasQuarterlyChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>4T/2025: 5.491</h3>
+                        <p>Recuperação de 14,5% vs 3T</p>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart-title">Ofertas Anual</div>
+                    <div class="chart-subtitle">Evolução anual e variações</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="ofertasAnnualChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>2025*: -20,3%</h3>
+                        <p>Ajuste após pico de 2024</p>
+                    </div>
+                </div>
+            </div>
+            <!-- Resumo Executivo Ofertas -->
+            <div class="chart-container">
+                <div class="chart-title">📈 Resumo Executivo - Ofertas</div>
+                <div class="insights">
+                    <h4>🎯 Destaques 2025:</h4>
+                    <ul>
+                        <li><strong>Estabilização:</strong> Média de 5.071 unidades/mês após ajuste do pico 2024</li>
+                        <li><strong>Recuperação 4T:</strong> 5.491 unidades (+14,5% vs 3T/2025)</li>
+                        <li><strong>Normalização:</strong> Retorno a patamares históricos pós-boom 2024</li>
+                        <li><strong>Base Sólida:</strong> Volume 16,8% superior vs 2021</li>
+                    </ul>
+                    
+                    <h4>⚠️ Pontos de Atenção:</h4>
+                    <ul>
+                        <li>Redução de 20,3% vs pico excepcional de 2024</li>
+                        <li>Necessidade de monitorar demanda vs oferta</li>
+                        <li>Sazonalidade do 4T pode ser temporária</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Seção Vendas -->
+        <div id="vendas" class="section">
+            <!-- Vendas Mensais -->
+            <div class="chart-container">
+                <div class="chart-title">Vendas Mensais - Evolução 2021-2025</div>
+                <div class="chart-subtitle">Volume mensal de vendas (Unidades)</div>
+                <div class="chart-wrapper">
+                    <canvas id="vendasMonthlyChart"></canvas>
+                </div>
+                <div class="insights">
+                    <h4>💡 Insights Principais:</h4>
+                    <ul>
+                        <li><strong>2025 YTD:</strong> Média de 383 unidades/mês (-26,9% vs 2024)</li>
+                        <li><strong>Pico 2024:</strong> Maio com 879 unidades - recorde da série</li>
+                        <li><strong>Destaque Out/2025:</strong> 498 unidades (+41,9% vs Out/2024)</li>
+                        <li><strong>Recuperação:</strong> Crescimento consistente desde julho/2025</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Grid para Trimestral e Anual -->
+            <div class="grid">
+                <div class="chart-container">
+                    <div class="chart-title">Vendas Trimestral</div>
+                    <div class="chart-subtitle">Volume por trimestre (Unidades)</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="vendasQuarterlyChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>4T/2025: 498*</h3>
+                        <p>Dados incompletos (só outubro)</p>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart-title">Vendas Anual</div>
+                    <div class="chart-subtitle">Evolução anual e variações</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="vendasAnnualChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>2025*: -26,9%</h3>
+                        <p>Impacto da base incompleta</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resumo Executivo Vendas -->
+            <div class="chart-container">
+                <div class="chart-title">📈 Resumo Executivo - Vendas</div>
+                <div class="insights">
+                    <h4>🎯 Destaques 2025:</h4>
+                    <ul>
+                        <li><strong>Momentum Outubro:</strong> 498 unidades (+41,9% vs Out/24)</li>
+                        <li><strong>Pico Junho:</strong> 542 unidades - melhor mês de 2025</li>
+                        <li><strong>Recuperação Semestral:</strong> Crescimento sustentado desde julho</li>
+                        <li><strong>Performance YTD:</strong> 3.834 unidades (dados até outubro)</li>
+                    </ul>
+                    
+                    <h4>⚠️ Pontos de Atenção:</h4>
+                    <ul>
+                        <li>Dados de 2025 incompletos prejudicam comparação anual</li>
+                        <li>Volatilidade mensal alta (277 a 542 unidades)</li>
+                        <li>Dependência do 4T para atingir metas anuais</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Seção Lançamentos -->
+        <div id="lancamentos" class="section">
+            <!-- Lançamentos Mensais -->
+            <div class="chart-container">
+                <div class="chart-title">Lançamentos Mensais - Evolução 2021-2025</div>
+                <div class="chart-subtitle">Volume mensal de lançamentos (Unidades e Empreendimentos)</div>
+                <div class="chart-wrapper">
+                    <canvas id="lancamentosMonthlyChart"></canvas>
+                </div>
+                <div class="insights">
+                    <h4>💡 Insights Principais:</h4>
+                    <ul>
+                        <li><strong>2025 YTD:</strong> Média de 156 unidades/mês (-33,7% vs 2024)</li>
+                        <li><strong>Pico Out/2025:</strong> 339 unidades (+182,5% vs Out/2024)</li>
+                        <li><strong>Concentração:</strong> Junho concentrou 456 unidades em 4 empreendimentos</li>
+                        <li><strong>Atividade:</strong> 17 empreendimentos lançados em 2025 vs 18 em 2024</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Grid para Trimestral e Anual -->
+            <div class="grid">
+                <div class="chart-container">
+                    <div class="chart-title">Lançamentos Trimestral</div>
+                    <div class="chart-subtitle">Volume por trimestre (Unidades)</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="lancamentosQuarterlyChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>2T/2025: 607</h3>
+                        <p>Melhor trimestre de 2025</p>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart-title">Lançamentos Anual</div>
+                    <div class="chart-subtitle">Evolução anual e variações</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="lancamentosAnnualChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>2025*: -33,7%</h3>
+                        <p>Retração após pico 2023</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resumo Executivo Lançamentos -->
+            <div class="chart-container">
+                <div class="chart-title">📈 Resumo Executivo - Lançamentos</div>
+                <div class="insights">
+                    <h4>🎯 Destaques 2025:</h4>
+                    <ul>
+                        <li><strong>Recuperação Recente:</strong> Outubro com 339 unidades (+182,5% vs Out/24)</li>
+                        <li><strong>Estabilização:</strong> 17 empreendimentos lançados vs 18 em 2024</li>
+                        <li><strong>Concentração Estratégica:</strong> Junho concentrou 29% dos lançamentos do 2T</li>
+                        <li><strong>Ciclo Normalizado:</strong> Após vale de 2024, retomada gradual</li>
+                    </ul>
+                    
+                    <h4>⚠️ Pontos de Atenção:</h4>
+                    <ul>
+                        <li>Volume ainda 67,9% abaixo do pico de 2021</li>
+                        <li>Alta volatilidade mensal (61 a 456 unidades)</li>
+                        <li>Necessidade de pipeline consistente para 2026</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Seção Preços -->
+        <div id="precos" class="section">
+            <!-- Preços Mensais -->
+            <div class="chart-container">
+                <div class="chart-title">Preços Médios Mensais - Oferta vs Venda</div>
+                <div class="chart-subtitle">Valor médio ponderado (R$/m²)</div>
+                <div class="chart-wrapper">
+                    <canvas id="precosMonthlyChart"></canvas>
+                </div>
+                <div class="insights">
+                    <h4>💡 Insights Principais:</h4>
+                    <ul>
+                        <li><strong>Gap de Preços:</strong> Oferta R$ 15.331/m² vs Venda R$ 12.143/m² (Out/25)</li>
+                        <li><strong>Crescimento Oferta:</strong> +12,3% anual vs 2024</li>
+                        <li><strong>Crescimento Venda:</strong> +14,8% anual vs 2024</li>
+                        <li><strong>Convergência:</strong> Gap diminuindo ao longo de 2025</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Grid para Comparativo Anual -->
+            <div class="grid">
+                <div class="chart-container">
+                    <div class="chart-title">Preço de Oferta - Evolução Anual</div>
+                    <div class="chart-subtitle">Valor médio ponderado (R$/m²)</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="precosOfertaAnnualChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>2025*: +12,3%</h3>
+                        <p>R$ 14.860/m² vs R$ 13.237/m²</p>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart-title">Preço de Venda - Evolução Anual</div>
+                    <div class="chart-subtitle">Valor médio ponderado (R$/m²)</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="precosVendaAnnualChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>2025*: +14,8%</h3>
+                        <p>R$ 12.366/m² vs R$ 10.770/m²</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resumo Executivo Preços -->
+            <div class="chart-container">
+                <div class="chart-title">📈 Resumo Executivo - Preços</div>
+                <div class="insights">
+                    <h4>🎯 Destaques 2025:</h4>
+                    <ul>
+                        <li><strong>Valorização Dupla:</strong> Oferta +12,3% e Venda +14,8% vs 2024</li>
+                        <li><strong>Convergência Positiva:</strong> Gap oferta-venda diminuindo (de 22,8% para 20,8%)</li>
+                        <li><strong>Patamar Premium:</strong> Oferta média acima de R$ 14.800/m²</li>
+                        <li><strong>Realização Crescente:</strong> Preço de venda acompanhando oferta</li>
+                    </ul>
+                    
+                    <h4>⚠️ Pontos de Atenção:</h4>
+                    <ul>
+                        <li>Pressão inflacionária nos custos de construção</li>
+                        <li>Necessidade de equilibrar preço vs velocidade de vendas</li>
+                        <li>Monitoramento do poder de compra do consumidor</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Seção VGV -->
+        <div id="vgv" class="section">
+            <!-- VGV vs VGL Mensais -->
+            <div class="chart-container">
+                <div class="chart-title">VGV vs VGL Mensais - 2025</div>
+                <div class="chart-subtitle">Valor Geral de Vendas vs Valor Geral de Lançamentos (R$ Milhões)</div>
+                <div class="chart-wrapper">
+                    <canvas id="vgvMonthlyChart"></canvas>
+                </div>
+                <div class="insights">
+                    <h4>💡 Insights Principais:</h4>
+                    <ul>
+                        <li><strong>VGV Out/2025:</strong> R$ 535,37 milhões (+117,6% vs Out/24)</li>
+                        <li><strong>VGL Out/2025:</strong> R$ 254,30 milhões (+325,7% vs Out/24)</li>
+                        <li><strong>Performance YTD:</strong> VGV acumulado de R$ 3,77 bilhões</li>
+                        <li><strong>Lançamentos:</strong> VGL total de R$ 2,80 bilhões (+11,2% vs 2024)</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Grid para Evolução Anual -->
+            <div class="grid">
+                <div class="chart-container">
+                    <div class="chart-title">VGV - Evolução Anual</div>
+                    <div class="chart-subtitle">Valor Geral de Vendas (R$ Bilhões)</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="vgvAnnualChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>2025*: R$ 3,77B</h3>
+                        <p>Projetado para R$ 4,5B no ano</p>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart-title">VGL - Evolução Anual</div>
+                    <div class="chart-subtitle">Valor Geral de Lançamentos (R$ Bilhões)</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="vglAnnualChart"></canvas>
+                    </div>
+                    <div class="highlight-box">
+                        <h3>2025*: R$ 2,80B</h3>
+                        <p>Crescimento de 11,2% vs 2024</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resumo Executivo VGV -->
+            <div class="chart-container">
+                <div class="chart-title">📈 Resumo Executivo - VGV</div>
+                <div class="insights">
+                    <h4>🎯 Destaques 2025:</h4>
+                    <ul>
+                        <li><strong>Forte Outubro:</strong> VGV de R$ 535M e VGL de R$ 254M</li>
+                        <li><strong>Crescimento VGL:</strong> +11,2% anual, sinalizando pipeline saudável</li>
+                        <li><strong>Momentum Trimestral:</strong> 4T iniciando com performance robusta</li>
+                        <li><strong>Eficiência Operacional:</strong> Conversão lançamento-venda otimizada</li>
+                    </ul>
+                    
+                    <h4>⚠️ Pontos de Atenção:</h4>
+                    <ul>
+                        <li>VGV anual projetado 6,2% abaixo do recorde de 2024</li>
+                        <li>Dependência do 4T para compensar início de ano mais fraco</li>
+                        <li>Necessidade de manutenção do ritmo de lançamentos</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Síntese Analítica Outubro -->
+        <div id="sintese" class="section">
+            <div class="chart-container">
+                <div class="chart-title">🎯 Síntese Analítica - Outubro 2025</div>
+                <div class="chart-subtitle">Análise integrada de performance e tendências</div>
+                
+                <div class="grid">
+                    <div class="insights">
+                        <h4>📈 Performance Outubro 2025</h4>
+                        <ul>
+                            <li><strong>IVV:</strong> 9,1% (+48,4% vs Out/24)</li>
+                            <li><strong>Ofertas:</strong> 5.491 unidades (-4,4% vs Out/24)</li>
+                            <li><strong>Vendas:</strong> 498 unidades (+41,9% vs Out/24)</li>
+                            <li><strong>Lançamentos:</strong> 339 unidades (+182,5% vs Out/24)</li>
+                            <li><strong>VGV:</strong> R$ 535M (+117,6% vs Out/24)</li>
+                            <li><strong>Preço Médio Venda:</strong> R$ 12.143/m² (+13,6% vs Out/24)</li>
+                        </ul>
+                    </div>
+
+                    <div class="insights">
+                        <h4>🔍 Principais Tendências</h4>
+                        <ul>
+                            <li><strong>Recuperação Consolidada:</strong> Todos os indicadores em alta vs Out/24</li>
+                            <li><strong>Velocidade Acelerada:</strong> IVV no maior patamar desde mar/22</li>
+                            <li><strong>Momentum de Vendas:</strong> Crescimento por 4 meses consecutivos</li>
+                            <li><strong>Pipeline Ativo:</strong> Lançamentos robustos alimentam oferta futura</li>
+                            <li><strong>Valorização Sustentada:</strong> Preços em trajetória ascendente</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="insights" style="margin-top: 30px;">
+                    <h4>🎯 Conclusões Estratégicas</h4>
+                    <ul>
+                        <li><strong>Mercado em Recuperação:</strong> 2025 consolida reversão da crise de 2023, com indicadores consistentemente acima de 2024</li>
+                        <li><strong>Equilíbrio Saudável:</strong> Crescimento de preços (+14,8%) acompanhado de velocidade (+48,4%), indicando demanda robusta</li>
+                        <li><strong>Ciclo Virtuoso:</strong> Lançamentos crescentes (+182,5%) alimentam pipeline, sustentando ofertas futuras</li>
+                        <li><strong>Qualidade do Crescimento:</strong> Aumento do VGV (+117,6%) reflete tanto volume quanto valorização</li>
+                    </ul>
+                </div>
+
+                <div class="insights" style="margin-top: 30px;">
+                    <h4>⚡ Recomendações Executivas</h4>
+                    <ul>
+                        <li><strong>Capitalizar Momentum:</strong> Intensificar lançamentos no 4T aproveitando velocidade de vendas elevada</li>
+                        <li><strong>Gestão de Preços:</strong> Manter estratégia de valorização gradual, monitorando elasticidade da demanda</li>
+                        <li><strong>Pipeline 2026:</strong> Acelerar aprovações e licenciamentos para sustentar ritmo de lançamentos</li>
+                        <li><strong>Otimização de Mix:</strong> Priorizar produtos com maior VGV/unidade dado o cenário de valorização</li>
+                    </ul>
+                </div>
+
+                <div class="highlight-box" style="margin-top: 30px;">
+                    <h3>🚀 Outlook 4T/2025</h3>
+                    <p><strong>Cenário Base:</strong> Manutenção da performance atual pode levar a um 4T recorde, com IVV próximo a 10% e VGV trimestral acima de R$ 1,6 bilhão</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Seções removidas: areas e outras não solicitadas -->
+    </div>
+
+    <script>
+        // Configurações gerais para todos os gráficos
+        Chart.defaults.font.family = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+        Chart.defaults.color = '#666';
+
+        // Função de navegação
+        function showSection(sectionId) {
+            // Ocultar todas as seções
+            const sections = document.querySelectorAll('.section');
+            sections.forEach(section => section.classList.remove('active'));
+            
+            // Mostrar seção selecionada
+            document.getElementById(sectionId).classList.add('active');
+            
+            // Atualizar botões de navegação
+            const buttons = document.querySelectorAll('.nav-btn');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        // ===== DADOS E GRÁFICOS IVV =====
+        
+        // Dados mensais IVV
+        const monthlyData = {
+            labels: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'],
+            datasets: [
+                {
+                    label: '2021',
+                    data: [8.6, 10.5, 10.9, 8.5, 8.1, 9.0, 7.7, 7.5, 8.8, 7.6, 6.5, 8.4],
+                    borderColor: '#e74c3c',
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2022',
+                    data: [5.2, 9.0, 10.1, 8.3, 8.5, 7.2, 7.6, 10.4, 7.0, 8.4, 7.4, 7.9],
+                    borderColor: '#f39c12',
+                    backgroundColor: 'rgba(243, 156, 18, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2023',
+                    data: [5.7, 5.6, 7.4, 7.4, 7.9, 7.3, 5.4, 6.9, 5.6, 4.9, 5.1, 5.4],
+                    borderColor: '#9b59b6',
+                    backgroundColor: 'rgba(155, 89, 182, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2024',
+                    data: [3.8, 4.2, 5.8, 6.3, 12.7, 7.2, 7.0, 7.6, 8.7, 6.1, 7.4, 6.4],
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2025*',
+                    data: [5.9, 6.2, 6.6, 5.6, 7.3, 10.4, 7.3, 8.2, 9.0, 9.1, null, null],
+                    borderColor: '#27ae60',
+                    backgroundColor: 'rgba(39, 174, 96, 0.1)',
+                    borderWidth: 4,
+                    tension: 0.4,
+                    borderDash: [5, 5]
+                }
+            ]
+        };
+
+        // Gráfico IVV mensal
+        const monthlyCtx = document.getElementById('monthlyChart').getContext('2d');
+        new Chart(monthlyCtx, {
+            type: 'line',
+            data: monthlyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        titleColor: 'white',
+                        bodyColor: 'white',
+                        borderColor: '#ddd',
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y + '%';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 3,
+                        max: 13,
+                        title: {
+                            display: true,
+                            text: 'IVV (%)'
+                        },
+                        grid: {
+                            color: 'rgba(0,0,0,0.1)'
+                        }
+                    },
+                    x: {
+                        grid: {
+                            color: 'rgba(0,0,0,0.1)'
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
+
+        // Dados trimestrais IVV
+        const quarterlyData = {
+            labels: ['1T', '2T', '3T', '4T'],
+            datasets: [
+                {
+                    label: '2021',
+                    data: [10.0, 8.5, 8.0, 7.5],
+                    backgroundColor: 'rgba(231, 76, 60, 0.8)',
+                    borderColor: '#e74c3c',
+                    borderWidth: 2
+                },
+                {
+                    label: '2022',
+                    data: [8.1, 8.0, 8.3, 7.9],
+                    backgroundColor: 'rgba(243, 156, 18, 0.8)',
+                    borderColor: '#f39c12',
+                    borderWidth: 2
+                },
+                {
+                    label: '2023',
+                    data: [6.2, 7.5, 6.0, 5.1],
+                    backgroundColor: 'rgba(155, 89, 182, 0.8)',
+                    borderColor: '#9b59b6',
+                    borderWidth: 2
+                },
+                {
+                    label: '2024',
+                    data: [4.6, 8.7, 7.8, 6.6],
+                    backgroundColor: 'rgba(52, 152, 219, 0.8)',
+                    borderColor: '#3498db',
+                    borderWidth: 2
+                },
+                {
+                    label: '2025*',
+                    data: [6.2, 7.8, 8.2, 9.1],
+                    backgroundColor: 'rgba(39, 174, 96, 0.8)',
+                    borderColor: '#27ae60',
+                    borderWidth: 3
+                }
+            ]
+        };
+
+        // Gráfico IVV trimestral
+        const quarterlyCtx = document.getElementById('quarterlyChart').getContext('2d');
+        new Chart(quarterlyCtx, {
+            type: 'bar',
+            data: quarterlyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 15
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 4,
+                        max: 11,
+                        title: {
+                            display: true,
+                            text: 'IVV (%)'
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados anuais IVV
+        const annualData = {
+            labels: ['2021', '2022', '2023', '2024', '2025*'],
+            datasets: [
+                {
+                    label: 'IVV Anual (%)',
+                    data: [8.5, 8.1, 6.2, 6.9, 7.6],
+                    backgroundColor: [
+                        'rgba(231, 76, 60, 0.8)',
+                        'rgba(243, 156, 18, 0.8)',
+                        'rgba(155, 89, 182, 0.8)',
+                        'rgba(52, 152, 219, 0.8)',
+                        'rgba(39, 174, 96, 0.8)'
+                    ],
+                    borderColor: [
+                        '#e74c3c',
+                        '#f39c12',
+                        '#9b59b6',
+                        '#3498db',
+                        '#27ae60'
+                    ],
+                    borderWidth: 2
+                }
+            ]
+        };
+
+        // Gráfico IVV anual
+        const annualCtx = document.getElementById('annualChart').getContext('2d');
+        new Chart(annualCtx, {
+            type: 'bar',
+            data: annualData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            afterLabel: function(context) {
+                                const variations = ['', '-5,1%', '-23,1%', '+11,5%', '+9,1%'];
+                                return variations[context.dataIndex] ? 'Var: ' + variations[context.dataIndex] : '';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 5,
+                        max: 9,
+                        title: {
+                            display: true,
+                            text: 'IVV (%)'
+                        }
+                    }
+                }
+            }
+        });
+
+        // ===== DADOS E GRÁFICOS OFERTAS =====
+
+        // Dados mensais Ofertas
+        const ofertasMonthlyData = {
+            labels: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'],
+            datasets: [
+                {
+                    label: '2021',
+                    data: [3319, 3782, 4319, 4047, 4690, 4492, 4268, 4263, 4582, 4496, 4762, 5074],
+                    borderColor: '#e74c3c',
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2022',
+                    data: [4693, 5174, 4761, 4718, 5026, 4752, 4322, 4512, 4273, 4803, 5028, 4695],
+                    borderColor: '#f39c12',
+                    backgroundColor: 'rgba(243, 156, 18, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2023',
+                    data: [4726, 4615, 4425, 4539, 5394, 5599, 5425, 5704, 6473, 6818, 6533, 7121],
+                    borderColor: '#9b59b6',
+                    backgroundColor: 'rgba(155, 89, 182, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2024',
+                    data: [7533, 7285, 7014, 6757, 6908, 6191, 5866, 5943, 5784, 5745, 5746, 5623],
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2025*',
+                    data: [5509, 5167, 5155, 4964, 4846, 5194, 4764, 4417, 5206, 5491, null, null],
+                    borderColor: '#27ae60',
+                    backgroundColor: 'rgba(39, 174, 96, 0.1)',
+                    borderWidth: 4,
+                    tension: 0.4,
+                    borderDash: [5, 5]
+                }
+            ]
+        };
+
+        // Gráfico Ofertas mensal
+        const ofertasMonthlyCtx = document.getElementById('ofertasMonthlyChart').getContext('2d');
+        new Chart(ofertasMonthlyCtx, {
+            type: 'line',
+            data: ofertasMonthlyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y.toLocaleString() + ' unidades';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 3000,
+                        title: {
+                            display: true,
+                            text: 'Unidades'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados trimestrais Ofertas
+        const ofertasQuarterlyData = {
+            labels: ['1T', '2T', '3T', '4T'],
+            datasets: [
+                {
+                    label: '2021',
+                    data: [3807, 4410, 4371, 4777],
+                    backgroundColor: 'rgba(231, 76, 60, 0.8)',
+                    borderColor: '#e74c3c',
+                    borderWidth: 2
+                },
+                {
+                    label: '2022',
+                    data: [4876, 4832, 4369, 4842],
+                    backgroundColor: 'rgba(243, 156, 18, 0.8)',
+                    borderColor: '#f39c12',
+                    borderWidth: 2
+                },
+                {
+                    label: '2023',
+                    data: [4589, 5177, 5867, 6824],
+                    backgroundColor: 'rgba(155, 89, 182, 0.8)',
+                    borderColor: '#9b59b6',
+                    borderWidth: 2
+                },
+                {
+                    label: '2024',
+                    data: [7277, 6619, 5864, 5705],
+                    backgroundColor: 'rgba(52, 152, 219, 0.8)',
+                    borderColor: '#3498db',
+                    borderWidth: 2
+                },
+                {
+                    label: '2025*',
+                    data: [5277, 5001, 4796, 5491],
+                    backgroundColor: 'rgba(39, 174, 96, 0.8)',
+                    borderColor: '#27ae60',
+                    borderWidth: 3
+                }
+            ]
+        };
+
+        // Gráfico Ofertas trimestral
+        const ofertasQuarterlyCtx = document.getElementById('ofertasQuarterlyChart').getContext('2d');
+        new Chart(ofertasQuarterlyCtx, {
+            type: 'bar',
+            data: ofertasQuarterlyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 15
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y.toLocaleString() + ' unidades';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 3500,
+                        title: {
+                            display: true,
+                            text: 'Unidades'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados anuais Ofertas
+        const ofertasAnnualData = {
+            labels: ['2021', '2022', '2023', '2024', '2025*'],
+            datasets: [
+                {
+                    label: 'Ofertas Anuais',
+                    data: [4341, 4730, 5614, 6366, 5071],
+                    backgroundColor: [
+                        'rgba(231, 76, 60, 0.8)',
+                        'rgba(243, 156, 18, 0.8)',
+                        'rgba(155, 89, 182, 0.8)',
+                        'rgba(52, 152, 219, 0.8)',
+                        'rgba(39, 174, 96, 0.8)'
+                    ],
+                    borderColor: [
+                        '#e74c3c',
+                        '#f39c12',
+                        '#9b59b6',
+                        '#3498db',
+                        '#27ae60'
+                    ],
+                    borderWidth: 2
+                }
+            ]
+        };
+
+        // Gráfico Ofertas anual
+        const ofertasAnnualCtx = document.getElementById('ofertasAnnualChart').getContext('2d');
+        new Chart(ofertasAnnualCtx, {
+            type: 'bar',
+            data: ofertasAnnualData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.parsed.y.toLocaleString() + ' unidades';
+                            },
+                            afterLabel: function(context) {
+                                const variations = ['', '+9,0%', '+18,7%', '+13,4%', '-20,3%'];
+                                return variations[context.dataIndex] ? 'Var: ' + variations[context.dataIndex] : '';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 4000,
+                        title: {
+                            display: true,
+                            text: 'Unidades'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // ===== DADOS E GRÁFICOS VENDAS =====
+
+        // Dados mensais Vendas
+        const vendasMonthlyData = {
+            labels: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'],
+            datasets: [
+                {
+                    label: '2021',
+                    data: [285, 397, 472, 343, 378, 404, 327, 320, 405, 343, 309, 427],
+                    borderColor: '#e74c3c',
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2022',
+                    data: [244, 468, 479, 392, 425, 343, 327, 468, 297, 404, 371, 372],
+                    borderColor: '#f39c12',
+                    backgroundColor: 'rgba(243, 156, 18, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2023',
+                    data: [271, 257, 327, 334, 424, 408, 291, 396, 365, 337, 334, 381],
+                    borderColor: '#9b59b6',
+                    backgroundColor: 'rgba(155, 89, 182, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2024',
+                    data: [288, 303, 410, 423, 879, 445, 409, 449, 505, 351, 424, 360],
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2025*',
+                    data: [324, 320, 340, 277, 354, 542, 350, 363, 466, 498, null, null],
+                    borderColor: '#27ae60',
+                    backgroundColor: 'rgba(39, 174, 96, 0.1)',
+                    borderWidth: 4,
+                    tension: 0.4,
+                    borderDash: [5, 5]
+                }
+            ]
+        };
+
+        // Gráfico Vendas mensal
+        const vendasMonthlyCtx = document.getElementById('vendasMonthlyChart').getContext('2d');
+        new Chart(vendasMonthlyCtx, {
+            type: 'line',
+            data: vendasMonthlyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y + ' unidades';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 200,
+                        max: 900,
+                        title: {
+                            display: true,
+                            text: 'Unidades'
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados trimestrais Vendas
+        const vendasQuarterlyData = {
+            labels: ['1T', '2T', '3T', '4T'],
+            datasets: [
+                {
+                    label: '2021',
+                    data: [1154, 1125, 1052, 1079],
+                    backgroundColor: 'rgba(231, 76, 60, 0.8)',
+                    borderColor: '#e74c3c',
+                    borderWidth: 2
+                },
+                {
+                    label: '2022',
+                    data: [1191, 1160, 1092, 1147],
+                    backgroundColor: 'rgba(243, 156, 18, 0.8)',
+                    borderColor: '#f39c12',
+                    borderWidth: 2
+                },
+                {
+                    label: '2023',
+                    data: [855, 1166, 1052, 1052],
+                    backgroundColor: 'rgba(155, 89, 182, 0.8)',
+                    borderColor: '#9b59b6',
+                    borderWidth: 2
+                },
+                {
+                    label: '2024',
+                    data: [1001, 1747, 1363, 1135],
+                    backgroundColor: 'rgba(52, 152, 219, 0.8)',
+                    borderColor: '#3498db',
+                    borderWidth: 2
+                },
+                {
+                    label: '2025*',
+                    data: [984, 1173, 1179, 498],
+                    backgroundColor: 'rgba(39, 174, 96, 0.8)',
+                    borderColor: '#27ae60',
+                    borderWidth: 3
+                }
+            ]
+        };
+
+        // Gráfico Vendas trimestral
+        const vendasQuarterlyCtx = document.getElementById('vendasQuarterlyChart').getContext('2d');
+        new Chart(vendasQuarterlyCtx, {
+            type: 'bar',
+            data: vendasQuarterlyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 15
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y + ' unidades';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 400,
+                        max: 1800,
+                        title: {
+                            display: true,
+                            text: 'Unidades'
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados anuais Vendas
+        const vendasAnnualData = {
+            labels: ['2021', '2022', '2023', '2024', '2025*'],
+            datasets: [
+                {
+                    label: 'Vendas Anuais',
+                    data: [4410, 4590, 4125, 5246, 3834],
+                    backgroundColor: [
+                        'rgba(231, 76, 60, 0.8)',
+                        'rgba(243, 156, 18, 0.8)',
+                        'rgba(155, 89, 182, 0.8)',
+                        'rgba(52, 152, 219, 0.8)',
+                        'rgba(39, 174, 96, 0.8)'
+                    ],
+                    borderColor: [
+                        '#e74c3c',
+                        '#f39c12',
+                        '#9b59b6',
+                        '#3498db',
+                        '#27ae60'
+                    ],
+                    borderWidth: 2
+                }
+            ]
+        };
+
+        // Gráfico Vendas anual
+        const vendasAnnualCtx = document.getElementById('vendasAnnualChart').getContext('2d');
+        new Chart(vendasAnnualCtx, {
+            type: 'bar',
+            data: vendasAnnualData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.parsed.y.toLocaleString() + ' unidades';
+                            },
+                            afterLabel: function(context) {
+                                const variations = ['', '+4,1%', '-10,1%', '+27,2%', '-26,9%'];
+                                return variations[context.dataIndex] ? 'Var: ' + variations[context.dataIndex] : '';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 3500,
+                        title: {
+                            display: true,
+                            text: 'Unidades'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+
+    <script>
+        // ===== DADOS E GRÁFICOS LANÇAMENTOS =====
+
+        // Dados mensais Lançamentos  
+        const lancamentosMonthlyData = {
+            labels: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'],
+            datasets: [
+                {
+                    label: '2021',
+                    data: [230, 662, 1021, 130, 852, 164, 56, 216, 248, 499, 382, 401],
+                    borderColor: '#e74c3c',
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2022',
+                    data: [null, 550, 204, 300, 732, 40, 72, 441, null, 516, 368, 48],
+                    borderColor: '#f39c12',
+                    backgroundColor: 'rgba(243, 156, 18, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2023',
+                    data: [496, 175, 74, 407, 1029, 550, 108, 462, 233, 644, null, 920],
+                    borderColor: '#9b59b6',
+                    backgroundColor: 'rgba(155, 89, 182, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2024',
+                    data: [105, null, 30, 82, 607, 221, 94, 221, 294, 120, 249, null],
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: '2025*',
+                    data: [105, null, 72, 90, 61, 456, 143, null, 294, 339, null, null],
+                    borderColor: '#27ae60',
+                    backgroundColor: 'rgba(39, 174, 96, 0.1)',
+                    borderWidth: 4,
+                    tension: 0.4,
+                    borderDash: [5, 5]
+                }
+            ]
+        };
+
+        // Gráfico Lançamentos mensal
+        const lancamentosMonthlyCtx = document.getElementById('lancamentosMonthlyChart').getContext('2d');
+        new Chart(lancamentosMonthlyCtx, {
+            type: 'line',
+            data: lancamentosMonthlyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        callbacks: {
+                            label: function(context) {
+                                if (context.parsed.y === null) return null;
+                                return context.dataset.label + ': ' + context.parsed.y + ' unidades';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 1200,
+                        title: {
+                            display: true,
+                            text: 'Unidades'
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados trimestrais Lançamentos
+        const lancamentosQuarterlyData = {
+            labels: ['1T', '2T', '3T', '4T'],
+            datasets: [
+                {
+                    label: '2021',
+                    data: [1913, 1146, 520, 1282],
+                    backgroundColor: 'rgba(231, 76, 60, 0.8)',
+                    borderColor: '#e74c3c',
+                    borderWidth: 2
+                },
+                {
+                    label: '2022',
+                    data: [754, 1072, 513, 932],
+                    backgroundColor: 'rgba(243, 156, 18, 0.8)',
+                    borderColor: '#f39c12',
+                    borderWidth: 2
+                },
+                {
+                    label: '2023',
+                    data: [667, 1986, 1592, 1564],
+                    backgroundColor: 'rgba(155, 89, 182, 0.8)',
+                    borderColor: '#9b59b6',
+                    borderWidth: 2
+                },
+                {
+                    label: '2024',
+                    data: [526, 910, 548, 369],
+                    backgroundColor: 'rgba(52, 152, 219, 0.8)',
+                    borderColor: '#3498db',
+                    borderWidth: 2
+                },
+                {
+                    label: '2025*',
+                    data: [177, 607, 437, 339],
+                    backgroundColor: 'rgba(39, 174, 96, 0.8)',
+                    borderColor: '#27ae60',
+                    borderWidth: 3
+                }
+            ]
+        };
+
+        // Gráfico Lançamentos trimestral
+        const lancamentosQuarterlyCtx = document.getElementById('lancamentosQuarterlyChart').getContext('2d');
+        new Chart(lancamentosQuarterlyCtx, {
+            type: 'bar',
+            data: lancamentosQuarterlyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 15
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y.toLocaleString() + ' unidades';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 2200,
+                        title: {
+                            display: true,
+                            text: 'Unidades'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados anuais Lançamentos
+        const lancamentosAnnualData = {
+            labels: ['2021', '2022', '2023', '2024', '2025*'],
+            datasets: [
+                {
+                    label: 'Lançamentos Anuais',
+                    data: [4861, 3271, 5809, 2353, 1560],
+                    backgroundColor: [
+                        'rgba(231, 76, 60, 0.8)',
+                        'rgba(243, 156, 18, 0.8)',
+                        'rgba(155, 89, 182, 0.8)',
+                        'rgba(52, 152, 219, 0.8)',
+                        'rgba(39, 174, 96, 0.8)'
+                    ],
+                    borderColor: [
+                        '#e74c3c',
+                        '#f39c12',
+                        '#9b59b6',
+                        '#3498db',
+                        '#27ae60'
+                    ],
+                    borderWidth: 2
+                }
+            ]
+        };
+
+        // Gráfico Lançamentos anual
+        const lancamentosAnnualCtx = document.getElementById('lancamentosAnnualChart').getContext('2d');
+        new Chart(lancamentosAnnualCtx, {
+            type: 'bar',
+            data: lancamentosAnnualData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.parsed.y.toLocaleString() + ' unidades';
+                            },
+                            afterLabel: function(context) {
+                                const variations = ['', '-32,7%', '+77,6%', '-59,5%', '-33,7%'];
+                                return variations[context.dataIndex] ? 'Var: ' + variations[context.dataIndex] : '';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 6500,
+                        title: {
+                            display: true,
+                            text: 'Unidades'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // ===== DADOS E GRÁFICOS PREÇOS =====
+
+        // Dados mensais Preços (Oferta vs Venda)
+        const precosMonthlyData = {
+            labels: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'],
+            datasets: [
+                {
+                    label: 'Preço Oferta 2025',
+                    data: [14098, 14149, 14215, 14531, 14847, 14941, 15268, 15489, 15725, 15331, null, null],
+                    borderColor: '#e74c3c',
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                },
+                {
+                    label: 'Preço Venda 2025',
+                    data: [10555, 10870, 12965, 13191, 12370, 12887, 12320, 12582, 12910, 12143, null, null],
+                    borderColor: '#27ae60',
+                    backgroundColor: 'rgba(39, 174, 96, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                }
+            ]
+        };
+
+        // Gráfico Preços mensal
+        const precosMonthlyCtx = document.getElementById('precosMonthlyChart').getContext('2d');
+        new Chart(precosMonthlyCtx, {
+            type: 'line',
+            data: precosMonthlyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': R$ ' + context.parsed.y.toLocaleString() + '/m²';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 10000,
+                        max: 16000,
+                        title: {
+                            display: true,
+                            text: 'R$/m²'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return 'R$ ' + value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados anuais Preços Oferta
+        const precosOfertaAnnualData = {
+            labels: ['2021', '2022', '2023', '2024', '2025*'],
+            datasets: [
+                {
+                    label: 'Preço Oferta Anual',
+                    data: [10676, 12348, 12892, 13237, 14860],
+                    backgroundColor: [
+                        'rgba(231, 76, 60, 0.8)',
+                        'rgba(243, 156, 18, 0.8)',
+                        'rgba(155, 89, 182, 0.8)',
+                        'rgba(52, 152, 219, 0.8)',
+                        'rgba(39, 174, 96, 0.8)'
+                    ],
+                    borderColor: [
+                        '#e74c3c',
+                        '#f39c12',
+                        '#9b59b6',
+                        '#3498db',
+                        '#27ae60'
+                    ],
+                    borderWidth: 2
+                }
+            ]
+        };
+
+        // Gráfico Preços Oferta anual
+        const precosOfertaAnnualCtx = document.getElementById('precosOfertaAnnualChart').getContext('2d');
+        new Chart(precosOfertaAnnualCtx, {
+            type: 'bar',
+            data: precosOfertaAnnualData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return 'R$ ' + context.parsed.y.toLocaleString() + '/m²';
+                            },
+                            afterLabel: function(context) {
+                                const variations = ['', '+15,7%', '+4,4%', '+2,7%', '+12,3%'];
+                                return variations[context.dataIndex] ? 'Var: ' + variations[context.dataIndex] : '';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 10000,
+                        max: 16000,
+                        title: {
+                            display: true,
+                            text: 'R$/m²'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return 'R$ ' + value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados anuais Preços Venda
+        const precosVendaAnnualData = {
+            labels: ['2021', '2022', '2023', '2024', '2025*'],
+            datasets: [
+                {
+                    label: 'Preço Venda Anual',
+                    data: [9321, 9652, 11295, 10770, 12366],
+                    backgroundColor: [
+                        'rgba(231, 76, 60, 0.8)',
+                        'rgba(243, 156, 18, 0.8)',
+                        'rgba(155, 89, 182, 0.8)',
+                        'rgba(52, 152, 219, 0.8)',
+                        'rgba(39, 174, 96, 0.8)'
+                    ],
+                    borderColor: [
+                        '#e74c3c',
+                        '#f39c12',
+                        '#9b59b6',
+                        '#3498db',
+                        '#27ae60'
+                    ],
+                    borderWidth: 2
+                }
+            ]
+        };
+
+        // Gráfico Preços Venda anual
+        const precosVendaAnnualCtx = document.getElementById('precosVendaAnnualChart').getContext('2d');
+        new Chart(precosVendaAnnualCtx, {
+            type: 'bar',
+            data: precosVendaAnnualData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return 'R$ ' + context.parsed.y.toLocaleString() + '/m²';
+                            },
+                            afterLabel: function(context) {
+                                const variations = ['', '+3,6%', '+17,0%', '-4,6%', '+14,8%'];
+                                return variations[context.dataIndex] ? 'Var: ' + variations[context.dataIndex] : '';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 9000,
+                        max: 13000,
+                        title: {
+                            display: true,
+                            text: 'R$/m²'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return 'R$ ' + value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // ===== DADOS E GRÁFICOS VGV =====
+
+        // Dados mensais VGV vs VGL
+        const vgvMonthlyData = {
+            labels: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'],
+            datasets: [
+                {
+                    label: 'VGV 2025 (R$ Milhões)',
+                    data: [237, 249, 400, 321, 337, 524, 328, 363, 475, 535, null, null],
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'VGL 2025 (R$ Milhões)',
+                    data: [263, null, 129, 132, 158, 487, 180, null, 1200, 254, null, null],
+                    borderColor: '#e74c3c',
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4,
+                    yAxisID: 'y'
+                }
+            ]
+        };
+
+        // Gráfico VGV mensal
+        const vgvMonthlyCtx = document.getElementById('vgvMonthlyChart').getContext('2d');
+        new Chart(vgvMonthlyCtx, {
+            type: 'line',
+            data: vgvMonthlyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label.split(' (')[0] + ': R$ ' + context.parsed.y.toLocaleString() + ' milhões';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        beginAtZero: true,
+                        max: 1300,
+                        title: {
+                            display: true,
+                            text: 'R$ Milhões'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return 'R$ ' + value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados anuais VGV
+        const vgvAnnualData = {
+            labels: ['2021', '2022', '2023', '2024', '2025*'],
+            datasets: [
+                {
+                    label: 'VGV Anual',
+                    data: [3.38, 3.29, 3.57, 4.02, 3.77],
+                    backgroundColor: [
+                        'rgba(231, 76, 60, 0.8)',
+                        'rgba(243, 156, 18, 0.8)',
+                        'rgba(155, 89, 182, 0.8)',
+                        'rgba(52, 152, 219, 0.8)',
+                        'rgba(39, 174, 96, 0.8)'
+                    ],
+                    borderColor: [
+                        '#e74c3c',
+                        '#f39c12',
+                        '#9b59b6',
+                        '#3498db',
+                        '#27ae60'
+                    ],
+                    borderWidth: 2
+                }
+            ]
+        };
+
+        // Gráfico VGV anual
+        const vgvAnnualCtx = document.getElementById('vgvAnnualChart').getContext('2d');
+        new Chart(vgvAnnualCtx, {
+            type: 'bar',
+            data: vgvAnnualData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return 'R$ ' + context.parsed.y.toFixed(2) + ' bilhões';
+                            },
+                            afterLabel: function(context) {
+                                const variations = ['', '-2,6%', '+8,4%', '+12,5%', '-6,2%'];
+                                return variations[context.dataIndex] ? 'Var: ' + variations[context.dataIndex] : '';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 4.5,
+                        title: {
+                            display: true,
+                            text: 'R$ Bilhões'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return 'R$ ' + value.toFixed(1) + 'B';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Dados anuais VGL
+        const vglAnnualData = {
+            labels: ['2021', '2022', '2023', '2024', '2025*'],
+            datasets: [
+                {
+                    label: 'VGL Anual',
+                    data: [4.70, 2.35, 4.66, 2.52, 2.80],
+                    backgroundColor: [
+                        'rgba(231, 76, 60, 0.8)',
+                        'rgba(243, 156, 18, 0.8)',
+                        'rgba(155, 89, 182, 0.8)',
+                        'rgba(52, 152, 219, 0.8)',
+                        'rgba(39, 174, 96, 0.8)'
+                    ],
+                    borderColor: [
+                        '#e74c3c',
+                        '#f39c12',
+                        '#9b59b6',
+                        '#3498db',
+                        '#27ae60'
+                    ],
+                    borderWidth: 2
+                }
+            ]
+        };
+
+        // Gráfico VGL anual
+        const vglAnnualCtx = document.getElementById('vglAnnualChart').getContext('2d');
+        new Chart(vglAnnualCtx, {
+            type: 'bar',
+            data: vglAnnualData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return 'R$ ' + context.parsed.y.toFixed(2) + ' bilhões';
+                            },
+                            afterLabel: function(context) {
+                                const variations = ['', '-49,9%', '+98,2%', '-45,9%', '+11,2%'];
+                                return variations[context.dataIndex] ? 'Var: ' + variations[context.dataIndex] : '';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 5,
+                        title: {
+                            display: true,
+                            text: 'R$ Bilhões'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return 'R$ ' + value.toFixed(1) + 'B';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

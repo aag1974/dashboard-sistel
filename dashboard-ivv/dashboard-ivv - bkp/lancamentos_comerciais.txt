@@ -1,0 +1,26 @@
+=== LANÇAMENTOS POR ANO ===
+Regra: Cada empreendimento é contado quando o incorporador o insere no sistema como lançamento.
+Fases posteriores são ignoradas.
+
+Ano: 2023
+Total lançamentos: 1
+Empreendimentos Lançados:
+
+  - 12 | DIRECIONAL INCORPORAÇÕES | Santa Maria | TOTAL VILLE CONVIVER
+
+Ano: 2024
+Total lançamentos: 1
+Empreendimentos Lançados:
+
+  - 09 | CONSTRUTORA VILLELA E CARVALHO LTDA | Noroeste | BIOME STUDIOS
+
+Ano: 2025
+Total lançamentos: 5
+Empreendimentos Lançados:
+
+  - 04 | CONSTRUTORA VILLELA E CARVALHO LTDA | Noroeste | AMAZE STUDIOS LOJA
+  - 06 | CONSTRUTORA VILLELA E CARVALHO LTDA | Águas Claras | EMPREENDIMENTOS YARDS
+  - 06 | CONSTRUTORA VILLELA E CARVALHO LTDA | Águas Claras | YARDS
+  - 07 | CONSTRUTORA VILLELA E CARVALHO LTDA | Águas Claras | HIGHLINE
+  - 10 | SOLTEC ENGENHARIA LTDA | Guará | DOLCE VITTA COMERCIAL
+
