@@ -3955,6 +3955,14 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             const section = document.createElement('div');
             section.className = 'section';
             
+            // ===== ADICIONAR IDENTIFICADORES PARA EXPORTAÇÃO =====
+            // Facilita a identificação da variável na exportação Excel/PDF
+            if (varMeta.name) {{
+                section.setAttribute('data-var', varMeta.name);
+                section.setAttribute('data-variable', varMeta.name);
+                section.id = `section-${{varMeta.name}}`;
+            }}
+            
             const header = document.createElement('div');
             header.className = 'section-header';
             
@@ -4031,6 +4039,8 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             }}
 
             const wb = XLSX.utils.book_new();
+            const usedNames = new Set(); // Controle de nomes já usados
+            let sectionIndex = 1; // Contador para backup
 
             sections.forEach(section => {{
                 const titleEl = section.querySelector('.section-title');
@@ -4039,8 +4049,99 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 if (!table) return;
 
                 const title = titleEl ? titleEl.innerText.trim() : "Variável";
-
-                // Extrair linhas
+                
+                // ===== ESTRATÉGIA PARA EXTRAIR NOME DA VARIÁVEL =====
+                let varName = null;
+                
+                // Método 1: Tentar extrair do atributo data-var (se existir)
+                varName = section.getAttribute('data-var') || section.getAttribute('data-variable');
+                
+                // Método 2: Procurar no ID da seção (formato comum: section-P1, section-P4_1)
+                if (!varName && section.id) {{
+                    const idMatch = section.id.match(/section-(.+)/);
+                    if (idMatch) varName = idMatch[1];
+                }}
+                
+                // Método 3: Procurar em classes CSS (formato comum: var-P1, variable-P4_1)
+                if (!varName && section.className) {{
+                    const classMatch = section.className.match(/(?:var|variable)-([A-Za-z0-9_]+)/);
+                    if (classMatch) varName = classMatch[1];
+                }}
+                
+                // Método 4: Tentar extrair do conteúdo do título (formato comum: "P1. Título" ou "P4_1 - Título")
+                if (!varName) {{
+                    const titleMatch = title.match(/^([A-Za-z0-9_]+)[\\.\\s\\-:\\|]/);
+                    if (titleMatch) varName = titleMatch[1];
+                }}
+                
+                // Método 5: Usar índice da variável de VARS_META (se disponível)
+                if (!varName && typeof VARS_META !== 'undefined' && VARS_META[sectionIndex - 1]) {{
+                    varName = VARS_META[sectionIndex - 1].name;
+                }}
+                
+                // ===== CRIAR NOME DA ABA =====
+                let sheetName;
+                
+                if (varName) {{
+                    // Formato preferido: "P1 - Título" ou "P4_1 - Título"
+                    let combinedTitle = `${{varName}} - ${{title}}`;
+                    
+                    // Se o título já contém a variável no início, evitar duplicação
+                    if (title.toLowerCase().startsWith(varName.toLowerCase())) {{
+                        combinedTitle = title;
+                    }}
+                    
+                    // Limpar caracteres proibidos pelo Excel
+                    combinedTitle = combinedTitle.replace(/[:\\\\/\\?\\*\\[\\]]/g, "");
+                    
+                    // Limitar a 31 caracteres (limite do Excel)
+                    if (combinedTitle.length > 31) {{
+                        // Tentar formato mais compacto: "P1-Título"
+                        const compactTitle = `${{varName}}-${{title.replace(/[:\\\\/\\?\\*\\[\\]\\s]/g, "")}}`;
+                        if (compactTitle.length <= 31) {{
+                            sheetName = compactTitle;
+                        }} else {{
+                            // Cortar título mas manter variável
+                            const maxTitleLength = 31 - varName.length - 1; // -1 para o hífen
+                            const truncatedTitle = title.replace(/[:\\\\/\\?\\*\\[\\]]/g, "").substring(0, maxTitleLength);
+                            sheetName = `${{varName}}-${{truncatedTitle}}`;
+                        }}
+                    }} else {{
+                        sheetName = combinedTitle;
+                    }}
+                }} else {{
+                    // Fallback: usar índice numérico
+                    let safeName = title.replace(/[:\\\\/\\?\\*\\[\\]]/g, "");
+                    safeName = safeName.replace(/\\s+/g, ' ').trim();
+                    
+                    // Adicionar número da seção
+                    if (safeName.length > 27) {{ // Reservar espaço para " (X)"
+                        safeName = safeName.substring(0, 27);
+                    }}
+                    sheetName = `${{safeName}} (${{sectionIndex}})`;
+                }}
+                
+                // ===== GARANTIR UNICIDADE =====
+                let finalName = sheetName;
+                let counter = 1;
+                
+                // Se o nome já existe, adicionar contador
+                while (usedNames.has(finalName)) {{
+                    const suffix = ` (${{counter}})`;
+                    const maxLength = 31 - suffix.length;
+                    
+                    if (sheetName.length > maxLength) {{
+                        finalName = sheetName.substring(0, maxLength) + suffix;
+                    }} else {{
+                        finalName = sheetName + suffix;
+                    }}
+                    counter++;
+                }}
+                
+                // Registrar nome usado
+                usedNames.add(finalName);
+                
+                // ===== EXTRAIR DADOS DA TABELA =====
                 const rows = [];
                 table.querySelectorAll('tr').forEach(tr => {{
                     const row = [];
@@ -4050,29 +4151,29 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     rows.push(row);
                 }});
 
-                // Criar aba
+                // ===== CRIAR PLANILHA =====
                 const activeFilters = getActiveFiltersDescription();
-
+                
                 const ws = XLSX.utils.aoa_to_sheet([
-                    [title],
+                    [title], // Título completo na primeira linha
                     [activeFilters.length ? ('Filtros aplicados: ' + activeFilters.join(' | ')) : 'Filtros aplicados: Nenhum'],
-                    [],
+                    [], // Linha vazia
                     ...rows
                 ]);
 
-                // Remove caracteres proibidos pelo Excel
-                let safeName = title.replace(/[:\\\\/\\?\\*\\[\\]]/g, "");
-
-                // Remove múltiplos espaços
-                safeName = safeName.replace(/\\s+/g, ' ').trim();
-
-                // Corta para 31 caracteres (limite do Excel)
-                const sheetName = safeName.substring(0, 31) || "Aba";
-                XLSX.utils.book_append_sheet(wb, ws, sheetName);
+                // Adicionar aba ao workbook
+                XLSX.utils.book_append_sheet(wb, ws, finalName);
+                
+                console.log(`✅ Aba criada: "${{finalName}}" (variável: ${{varName || 'não identificada'}})`);
+                sectionIndex++;
             }});
 
+            // ===== SALVAR ARQUIVO =====
             const fileName = "tabelas_exportadas.xlsx";
             XLSX.writeFile(wb, fileName);
+            
+            console.log(`📊 Excel exportado com ${{usedNames.size}} abas: ${{fileName}}`);
+            alert(`✅ Excel exportado com sucesso!\\n\\n📊 ${{usedNames.size}} abas criadas\\n📁 Arquivo: ${{fileName}}`);
         }}
 
         // ===== FUNÇÕES DE EXPORTAÇÃO PDF =====
