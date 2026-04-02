@@ -102,8 +102,25 @@
           "added": "2026-02-13T10:22:25.080541"
         }
       ]
+    },
+    {
+      "id": "viver-melhor",
+      "title": "Viver Melhor",
+      "icon": "📁",
+      "type": "group",
+      "expanded": false,
+      "children": [
+        {
+          "id": "viver-melhor-2026",
+          "title": "Viver Melhor 2026",
+          "file": "2026_viver_melhor.html",
+          "description": "",
+          "overlay": true,
+          "added": "2026-04-02T13:43:19.715396"
+        }
+      ]
     }
   ],
-  "updated": "2026-02-13T10:22:25.080741",
+  "updated": "2026-04-02T13:43:19.722504",
   "client_logo": "https://raw.githubusercontent.com/aag1974/dashboard-sistel/main/logo-sistel.png"
 }
