@@ -4,759 +4,361 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard Master - Header Overlay</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --primary: #4A90E2;
-            --primary-dark: #357ABD;
-            --secondary: #1976D2;
+            --teal: #7BAFC0;
+            --teal-dark: #4d8a9e;
+            --teal-light: #EDF5F7;
+            --green: #6FAB8A;
+            --green-dark: #3d8a62;
+            --red: #B83B5C;
             --bg: #f8f9fa;
-            --sidebar-bg: #ffffff;
-            --text: #333333;
-            --text-light: #666666;
-            --border: #e0e0e0;
-            --hover: #f0f4f8;
-            --active: #e5eef7;
-            --success: #10b981;
-            --warning: #f59e0b;
-            --shadow: 0 2px 10px rgba(0,0,0,0.1);
-            --shadow-lg: 0 4px 20px rgba(0,0,0,0.15);
+            --text: #333;
+            --text-light: #6c757d;
+            --border: #e5e5e5;
+            --hover: #f4f8f9;
+            --active-bg: #EDF5F7;
+            --active-border: #7BAFC0;
+            --active-text: #4d8a9e;
         }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            overflow: hidden;
-            height: 100vh;
+            background: var(--bg); color: var(--text);
+            overflow: hidden; height: 100vh;
         }
+        .dashboard-container { display: flex; height: 100vh; }
 
-        .dashboard-container {
-            display: flex;
-            height: 100vh;
-        }
-
+        /* ── SIDEBAR ── */
         .sidebar {
-            width: 280px;
-            background: var(--sidebar-bg);
-            border-right: 2px solid var(--border);
-            box-shadow: var(--shadow-lg);
-            display: flex;
-            flex-direction: column;
-            transition: width 0.3s ease;
-            z-index: 1000;
-            position: relative;
+            width: 220px; background: white;
+            border-right: 0.5px solid var(--border);
+            display: flex; flex-direction: column;
+            flex-shrink: 0; transition: width 0.25s ease; z-index: 1000;
         }
+        .sidebar.collapsed { width: 52px; }
 
-        .sidebar.collapsed {
-            width: 60px;
+        .sidebar-logo {
+            padding: 12px 14px;
+            border-bottom: 0.5px solid var(--border);
+            display: flex; align-items: center; justify-content: center;
+            min-height: 70px; overflow: hidden;
         }
-
-        .sidebar-header {
-            padding: 20px 10px;
-            border-bottom: 1px solid var(--border);
-            background: #ffffff;
-            color: var(--text);
-            text-align: center;
-            transition: all 0.3s ease;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100px;
-        }
-
-        .sidebar.collapsed .sidebar-header {
-            padding: 10px 5px;
-            min-height: 60px;
-        }
-
         .client-logo {
-            width: 160px;
-            height: 100px;
-            object-fit: contain;
-            transition: all 0.3s ease;
-            border-radius: 0;
-            background: transparent;
-            padding: 0;
-            border: none;
+            max-width: 148px; max-height: 52px;
+            object-fit: contain; transition: all 0.25s;
         }
-
-        .sidebar.collapsed .client-logo {
-            width: 55px;
-            height: 45px;
-        }
-
-        .logo-placeholder {
-            width: 120px;
-            height: 80px;
-            background: transparent;
-            border-radius: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--primary);
-            font-size: 32px;
-            transition: all 0.3s ease;
-        }
-
-        .sidebar.collapsed .logo-placeholder {
-            width: 45px;
-            height: 35px;
-            font-size: 20px;
-        }
-
-        .sidebar-toggle-container {
-            position: absolute;
-            bottom: 12px;
-            left: 0;
-            width: 100%;
-            display: flex;
-            justify-content: center;
-        }
-
-        .sidebar-toggle-btn {
-            width: 40px;
-            height: 40px;
-            border-radius: 8px;
-            background: transparent;
-            color: var(--primary);
-            border: 1px solid var(--primary);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-size: 18px;
-        }
-
-        .sidebar-toggle-btn:hover {
-            background: var(--primary);
-            color: white;
-        }
-
-        .sidebar.collapsed .sidebar-toggle-btn i {
-            transform: rotate(180deg);
-        }
+        .sidebar.collapsed .client-logo { max-width: 30px; max-height: 30px; }
+        .logo-placeholder { font-size: 24px; color: var(--teal); }
 
         .sidebar-menu {
-            flex: 1;
-            overflow-y: auto;
-            padding: 8px 0;
+            flex: 1; overflow-y: auto; overflow-x: hidden; padding: 5px 0;
         }
+        .sidebar-menu::-webkit-scrollbar { width: 3px; }
+        .sidebar-menu::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
         .menu-item {
-            display: flex;
-            align-items: center;
-            padding: 10px 15px;
-            color: var(--text);
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border-left: 3px solid transparent;
-            position: relative;
+            display: flex; align-items: center; gap: 9px;
+            padding: 9px 14px; cursor: pointer;
+            border-left: 2px solid transparent;
+            font-size: 13px; color: var(--text);
+            transition: background 0.15s, border-color 0.15s;
+            position: relative; user-select: none;
         }
+        .menu-item:hover { background: var(--hover); border-left-color: var(--teal); }
+        .menu-item.active { background: var(--active-bg); border-left-color: var(--active-border); color: var(--active-text); font-weight: 500; }
+        .menu-item.group-open { color: var(--active-text); font-weight: 500; }
 
-        .menu-item:hover {
-            background: var(--hover);
-            border-left-color: var(--primary);
-        }
+        .menu-icon { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; }
+        .menu-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity 0.2s; }
+        .sidebar.collapsed .menu-text { opacity: 0; pointer-events: none; }
 
-        .menu-item.active {
-            background: var(--active);
-            border-left-color: var(--secondary);
-            color: var(--secondary);
-            font-weight: 600;
-        }
+        .expand-icon { font-size: 9px; color: #bbb; transition: transform 0.2s; flex-shrink: 0; }
+        .menu-item.group-open .expand-icon { transform: rotate(90deg); }
+        .sidebar.collapsed .expand-icon { display: none; }
 
-        .menu-item .icon {
-            min-width: 20px;
-            width: 20px;
-            height: 20px;
-            margin-right: 10px;
-            font-size: 16px;
-            text-align: center;
-            transition: all 0.3s ease;
+        .menu-tooltip {
+            display: none; position: absolute; left: 58px; top: 50%;
+            transform: translateY(-50%); background: #222; color: #fff;
+            padding: 4px 10px; border-radius: 5px; font-size: 12px;
+            white-space: nowrap; pointer-events: none; z-index: 9999;
         }
-
-        .sidebar.collapsed .menu-item .icon {
-            margin-right: 0;
-        }
-
-        .menu-item .text {
-            flex: 1;
-            transition: all 0.3s ease;
-            white-space: nowrap;
-            font-size: 14px;
-        }
-
-        .sidebar.collapsed .menu-item .text {
-            display: none;
-        }
-
-        .menu-item .expand-icon {
-            font-size: 10px;
-            transform: rotate(0deg);
-            transition: transform 0.3s ease;
-        }
-
-        .menu-item.expanded .expand-icon {
-            transform: rotate(90deg);
-        }
-
-        .sidebar.collapsed .menu-item .expand-icon {
-            display: none;
-        }
+        .sidebar.collapsed .menu-item:hover .menu-tooltip { display: block; }
 
         .submenu {
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.3s ease;
-            background: rgba(74, 144, 226, 0.02);
-            border-left: 2px solid var(--primary);
+            max-height: 0; overflow: hidden;
+            transition: max-height 0.25s ease;
+            background: rgba(123,175,192,0.03);
+            border-left: 2px solid var(--border);
+            margin-left: 22px;
         }
-
-        .submenu.expanded {
-            max-height: 400px;
-        }
+        .submenu.open { max-height: 600px; }
+        .sidebar.collapsed .submenu { display: none; }
 
         .submenu-item {
-            display: flex;
-            align-items: center;
-            padding: 8px 15px 8px 40px;
-            color: var(--text-light);
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border-left: 2px solid transparent;
-            position: relative;
-            font-size: 13px;
+            padding: 7px 10px 7px 12px;
+            font-size: 12px; color: var(--text-light);
+            cursor: pointer; border-left: 2px solid transparent;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .submenu-item:hover { background: var(--hover); border-left-color: var(--teal); color: var(--text); }
+        .submenu-item.active { background: var(--active-bg); border-left-color: var(--active-border); color: var(--active-text); font-weight: 500; }
+
+        /* ── RODAPÉ SIDEBAR ── */
+        .sidebar-footer {
+            border-top: 0.5px solid var(--border);
+            padding: 9px 11px;
+            display: flex; align-items: center; gap: 8px; overflow: hidden;
         }
 
-        .submenu-item:hover {
-            background: var(--hover);
-            border-left-color: var(--primary);
-            color: var(--text);
+        .opiniao-brand {
+            display: flex; align-items: center; gap: 7px;
+            flex: 1; overflow: hidden; transition: opacity 0.2s;
         }
+        .sidebar.collapsed .opiniao-brand { opacity: 0; width: 0; pointer-events: none; }
 
-        .submenu-item.active {
-            background: var(--active);
-            border-left-color: var(--secondary);
-            color: var(--secondary);
-            font-weight: 600;
+        .opiniao-logo-img {
+            height: 28px; width: auto; object-fit: contain; flex-shrink: 0;
         }
-
-        .submenu-item.overlay-enabled {
-            border-right: 2px solid var(--success);
-        }
-
-        .sidebar.collapsed .submenu {
-            display: none;
-        }
-
-        .tooltip {
-            position: absolute;
-            left: 70px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: #333;
-            color: white;
-            padding: 6px 10px;
-            border-radius: 4px;
-            font-size: 11px;
+        .opiniao-name {
+            font-size: 11px; font-weight: 600; color: #c0c0c0;
             white-space: nowrap;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease;
-            z-index: 1000;
         }
 
-        .sidebar.collapsed .menu-item:hover .tooltip {
-            opacity: 0.9;
+        .toggle-btn {
+            width: 28px; height: 28px;
+            border: 0.5px solid var(--border); border-radius: 6px;
+            background: var(--bg); color: #aaa;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 13px; flex-shrink: 0;
+            transition: background 0.15s, color 0.15s;
+            user-select: none;
         }
+        .toggle-btn:hover { background: #e9ecef; color: #555; }
 
-        .main-content {
-            flex: 1;
-            background: var(--bg);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .content-frame {
-            width: 100%;
-            height: 100vh;
-            border: none;
-            background: white;
-        }
+        /* ── MAIN CONTENT ── */
+        .main-content { flex: 1; background: var(--bg); position: relative; overflow: hidden; }
+        .content-frame { width: 100%; height: 100vh; border: none; background: white; }
 
         .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            font-size: 18px;
-            color: var(--text-light);
-            background: white;
+            display: flex; align-items: center; justify-content: center;
+            height: 100vh; font-size: 15px; color: var(--text-light); background: white; gap: 12px;
         }
-
-        .loading-spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid var(--border);
-            border-top: 4px solid var(--primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-right: 15px;
+        .loading-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--teal); opacity: 0.3;
+            animation: pulse 1.2s ease-in-out infinite;
         }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+        .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes pulse { 0%,100%{opacity:0.3;transform:scale(1)} 50%{opacity:1;transform:scale(1.3)} }
 
         .welcome {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            text-align: center;
-            padding: 40px;
-            background: white;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            height: 100vh; text-align: center; padding: 40px; background: white;
         }
+        .welcome-icon { font-size: 48px; margin-bottom: 16px; }
+        .welcome h2 { color: var(--teal-dark); font-size: 20px; margin-bottom: 8px; font-weight: 500; }
+        .welcome p { color: var(--text-light); max-width: 420px; line-height: 1.6; font-size: 14px; }
 
-        .welcome-icon {
-            font-size: 64px;
-            color: var(--primary);
-            margin-bottom: 20px;
+        .error-state {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            height: 100vh; text-align: center; padding: 40px; background: white;
         }
-
-        .welcome h2 {
-            color: var(--primary);
-            margin-bottom: 10px;
-        }
-
-        .welcome p {
-            color: var(--text-light);
-            margin-bottom: 30px;
-            max-width: 500px;
-            line-height: 1.6;
-        }
-
-        .feature-highlight {
-            background: rgba(74, 144, 226, 0.05);
-            border: 1px solid rgba(74, 144, 226, 0.2);
-            padding: 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-            color: var(--primary-dark);
-        }
-
-        .feature-highlight h3 {
-            margin-bottom: 10px;
-            color: var(--primary);
-        }
+        .error-state h2 { color: var(--red); font-size: 16px; margin: 12px 0 8px; font-weight: 500; }
+        .error-state p { color: var(--text-light); font-size: 13px; }
 
         @media (max-width: 768px) {
-            .sidebar {
-                position: absolute;
-                left: -280px;
-                width: 280px;
-                z-index: 2000;
-                transition: left 0.3s ease;
-            }
-
-            .sidebar.mobile-open {
-                left: 0;
-            }
-
-            .sidebar.collapsed {
-                left: -280px;
-            }
-
-            .main-content {
-                margin-left: 0;
-            }
-        }
-
-        .mobile-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            z-index: 1500;
-            display: none;
-        }
-
-        .mobile-overlay.active {
-            display: block;
+            .sidebar { position: absolute; left: -220px; z-index: 2000; transition: left 0.25s; }
+            .sidebar.mobile-open { left: 0; }
+            .mobile-overlay { position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:1500;display:none; }
+            .mobile-overlay.active { display: block; }
         }
     </style>
 </head>
 <body>
-    <div class="dashboard-container">
-        <div class="sidebar" id="sidebar">
-            <div class="sidebar-header">
-                <div class="logo-container">
-                    <img src="https://raw.githubusercontent.com/aag1974/dashboard-sistel/main/logo-sistel.png" alt="Logo do Cliente" class="client-logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" /><div class="logo-placeholder" style="display:none;">🏢</div>
-                </div>
-            </div>
-
-            <nav class="sidebar-menu" id="sidebarMenu">
-                <!-- Menu será gerado dinamicamente -->
-            </nav>
-
-            <div class="sidebar-toggle-container">
-                <button id="sidebarToggle" class="sidebar-toggle-btn" onclick="toggleSidebar()">
-                    <i id="sidebarToggleIcon" class="fa fa-chevron-left"></i>
-                </button>
-            </div>
+<div class="dashboard-container">
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+            <img src="https://raw.githubusercontent.com/aag1974/dashboard-sistel/main/logo-sistel.png" alt="Logo do Cliente" class="client-logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" /><div class="logo-placeholder" style="display:none;">🏢</div>
         </div>
-
-        <div class="mobile-overlay" id="mobileOverlay" onclick="closeMobileSidebar()"></div>
-
-        <div class="main-content">
-            <iframe class="content-frame" id="contentFrame" style="display: none;"></iframe>
-            
-            <div class="welcome" id="welcomeState" style="display: none;">
-                <div class="welcome-icon">🎯</div>
-                <h2>Dashboard Master - Header Overlay</h2>
-                <p>Sistema otimizado onde análises SPSS sobrepõem toda a interface com header próprio, mantendo apenas sidebar para navegação.</p>
-                
-                <div class="feature-highlight">
-                    <h3>🚀 Arquitetura v2.0</h3>
-                    <ul style="text-align: left; line-height: 1.8;">
-                        <li>✅ <strong>Header SPSS fixo</strong> sobrepõe toda a tela</li>
-                        <li>✅ <strong>Filtros compactos</strong> em linha única no header</li>
-                        <li>✅ <strong>Máximo aproveitamento</strong> de espaço vertical</li>
-                        <li>✅ <strong>Menu lateral mínimo</strong> sempre acessível</li>
-                        <li>✅ <strong>Comunicação integrada</strong> via postMessage</li>
-                    </ul>
-                </div>
-
-                <div style="background: var(--hover); padding: 20px; border-radius: 8px; margin-top: 20px;">
-                    <h3 style="color: var(--primary); margin-bottom: 10px;">Como usar:</h3>
-                    <ol style="text-align: left; color: var(--text); line-height: 1.8;">
-                        <li>Gere análises com <code>criar_dashboard_v2.py</code></li>
-                        <li>Adicione no menu usando este gerenciador</li>
-                        <li>Navegue - cada análise ocupa toda a tela</li>
-                        <li>Use sidebar para trocar entre análises</li>
-                    </ol>
-                </div>
+        <nav class="sidebar-menu" id="sidebarMenu"></nav>
+        <div class="sidebar-footer">
+            <div class="opiniao-brand">
+                <img class="opiniao-logo-img" src="Logo_Opiniao.png"
+                     onerror="this.style.display='none'"
+                     alt="Opinião">
+                <span class="opiniao-name"></span>
             </div>
-
-            <div class="loading" id="loadingState" style="display: none;">
-                <div class="loading-spinner"></div>
-                Carregando Dados...
-            </div>
+            <div class="toggle-btn" id="toggleBtn" onclick="toggleSidebar()">‹</div>
         </div>
     </div>
 
-    <script>
-        const menuConfig = {"title": "Dashboard Master - Header Overlay", "created": "2025-11-27T09:31:04.218699", "architecture": "header_overlay", "description": "Sistema onde header SPSS sobrepõe interface e sidebar navega", "items": [{"id": "comunicacao", "title": "Comunicação", "icon": "🌐", "type": "group", "expanded": false, "children": [{"id": "2022", "title": "2022", "file": "2022_comunicacao.html", "description": "", "overlay": true, "added": "2025-12-07T19:13:57.631110"}, {"id": "2023", "title": "2023", "file": "2023_comunicacao.html", "description": "", "overlay": true, "added": "2025-12-07T19:15:35.908456"}, {"id": "2024", "title": "2024", "file": "2024_comunicacao.html", "description": "", "overlay": true, "added": "2025-12-08T14:47:04.878153"}, {"id": "2025", "title": "2025", "file": "2025_comunicacao.html", "description": "", "overlay": true, "added": "2025-12-08T14:47:31.444951"}]}, {"id": "comunicadores", "title": "Comunicadores", "icon": "📡", "type": "group", "expanded": false, "children": [{"id": "2023", "title": "2023", "file": "2023_comunicadores.html", "description": "", "overlay": true, "added": "2025-12-05T17:53:40.772834"}, {"id": "2024", "title": "2024", "file": "2024_comunicadores.html", "description": "", "overlay": true, "added": "2025-12-05T17:54:00.035900"}, {"id": "2025", "title": "2025", "file": "2025_comunicadores.html", "description": "", "overlay": true, "added": "2025-12-05T17:54:16.879286"}]}, {"id": "previdencial", "title": "Previdencial", "icon": "📁", "type": "group", "expanded": false, "children": [{"id": "2025_parcial", "title": "2025", "file": "2025_previdencial.html", "description": "", "overlay": true, "added": "2026-01-14T11:35:25.405920"}, {"id": "2024", "title": "2024", "file": "2024_previdencial.html", "description": "", "overlay": true, "added": "2026-02-13T10:22:25.080541"}]}, {"id": "viver-melhor", "title": "Viver Melhor", "icon": "📁", "type": "group", "expanded": false, "children": [{"id": "viver-melhor-2026", "title": "Viver Melhor 2026", "file": "2026_viver_melhor.html", "description": "", "overlay": true, "added": "2026-04-02T13:43:19.715396"}]}], "updated": "2026-04-02T13:43:19.722504", "client_logo": "https://raw.githubusercontent.com/aag1974/dashboard-sistel/main/logo-sistel.png"};
-        let currentSidebarState = 'expanded';
-        let currentMenuItem = null;
-        let currentAnalysisFrame = null;
-        let isMobile = window.innerWidth <= 768;
+    <div class="mobile-overlay" id="mobileOverlay" onclick="closeMobile()"></div>
 
-        let analysisStats = {
-            loaded: 0,
-            variables: 0,
-            filters: 0,
-            records: 0
-        };
+    <div class="main-content">
+        <iframe class="content-frame" id="contentFrame" style="display:none;"></iframe>
+        <div class="welcome" id="welcomeState" style="display:none;">
+            <h2>Dashboard Master - Header Overlay</h2>
+            <p>Selecione uma análise no menu lateral para começar.</p>
+        </div>
+        <div class="loading" id="loadingState" style="display:none;">
+            <div class="loading-dot"></div>
+            <div class="loading-dot"></div>
+            <div class="loading-dot"></div>
+            <span style="margin-left:8px;color:#aaa;font-size:13px">Carregando...</span>
+        </div>
+    </div>
+</div>
 
-        window.addEventListener('message', (event) => {
-            if (event.data && event.data.source === 'spss-analysis-overlay') {
-                const { type, data } = event.data;
-                
-                switch (type) {
-                    case 'analysis-loaded':
-                        analysisStats = {
-                            loaded: 1,
-                            variables: data.variables,
-                            filters: data.filters,
-                            records: data.records
-                        };
-                        console.log(`📊 Análise carregada: ${data.variables} vars, ${data.filters} filtros, ${data.records} registros`);
-                        break;
-                        
-                    case 'status-update':
-                        console.log(`📈 Status: ${data.text} (${data.type})`);
-                        break;
-                        
-                    case 'filter-changed':
-                        console.log(`🔍 Filtro: ${data.filterTitle} = ${data.selected || 'Todos'}`);
-                        break;
-                        
-                    case 'selection-changed':
-                        console.log(`🎯 Seleções: ${data.totalSelections} ativas`);
-                        break;
-                }
+<script>
+    const menuConfig = {"title": "Dashboard Master - Header Overlay", "created": "2025-11-27T09:31:04.218699", "architecture": "header_overlay", "description": "Sistema onde header SPSS sobrepõe interface e sidebar navega", "items": [{"id": "comunicacao", "title": "Comunicação", "icon": "🌐", "type": "group", "expanded": false, "children": [{"id": "2022", "title": "2022", "file": "2022_comunicacao.html", "description": "", "overlay": true, "added": "2025-12-07T19:13:57.631110"}, {"id": "2023", "title": "2023", "file": "2023_comunicacao.html", "description": "", "overlay": true, "added": "2025-12-07T19:15:35.908456"}, {"id": "2024", "title": "2024", "file": "2024_comunicacao.html", "description": "", "overlay": true, "added": "2025-12-08T14:47:04.878153"}, {"id": "2025", "title": "2025", "file": "2025_comunicacao.html", "description": "", "overlay": true, "added": "2025-12-08T14:47:31.444951"}]}, {"id": "comunicadores", "title": "Comunicadores", "icon": "📡", "type": "group", "expanded": false, "children": [{"id": "2023", "title": "2023", "file": "2023_comunicadores.html", "description": "", "overlay": true, "added": "2025-12-05T17:53:40.772834"}, {"id": "2024", "title": "2024", "file": "2024_comunicadores.html", "description": "", "overlay": true, "added": "2025-12-05T17:54:00.035900"}, {"id": "2025", "title": "2025", "file": "2025_comunicadores.html", "description": "", "overlay": true, "added": "2025-12-05T17:54:16.879286"}]}, {"id": "previdencial", "title": "Previdencial", "icon": "📁", "type": "group", "expanded": false, "children": [{"id": "2024", "title": "2024", "file": "2024_previdencial.html", "description": "", "overlay": true, "added": "2026-02-13T10:22:25.080541"}, {"id": "2025_parcial", "title": "2025", "file": "2025_previdencial.html", "description": "", "overlay": true, "added": "2026-01-14T11:35:25.405920"}]}, {"id": "viver-melhor", "title": "Viver Melhor", "icon": "📁", "type": "group", "expanded": false, "children": [{"id": "viver-melhor-2026", "title": "Viver Melhor 2026", "file": "2026_viver_melhor.html", "description": "", "overlay": true, "added": "2026-04-02T13:43:19.715396"}]}], "updated": "2026-04-08T15:04:09.336006", "client_logo": "https://raw.githubusercontent.com/aag1974/dashboard-sistel/main/logo-sistel.png"};
+    let collapsed = false;
+    let isMobile = window.innerWidth <= 768;
+    let currentAnalysisFrame = null;
+    let analysisStats = { loaded:0, variables:0, filters:0, records:0 };
+
+    window.addEventListener('message', e => {
+        if (e.data && e.data.source === 'spss-analysis-overlay') {
+            const { type, data } = e.data;
+            if (type === 'analysis-loaded') {
+                analysisStats = { loaded:1, variables:data.variables, filters:data.filters, records:data.records };
             }
+        }
+    });
+
+    function toggleSidebar() {
+        const sb = document.getElementById('sidebar');
+        const btn = document.getElementById('toggleBtn');
+        if (isMobile) {
+            sb.classList.toggle('mobile-open');
+            document.getElementById('mobileOverlay').classList.toggle('active');
+        } else {
+            collapsed = !collapsed;
+            sb.classList.toggle('collapsed', collapsed);
+            btn.textContent = collapsed ? '›' : '‹';
+        }
+    }
+
+    function closeMobile() {
+        document.getElementById('sidebar').classList.remove('mobile-open');
+        document.getElementById('mobileOverlay').classList.remove('active');
+    }
+
+    function renderMenu() {
+        const nav = document.getElementById('sidebarMenu');
+        nav.innerHTML = '';
+        menuConfig.items.forEach(item => {
+            if (item.type === 'group') renderGroup(nav, item);
+            else renderItem(nav, item);
+        });
+    }
+
+    function renderGroup(container, group) {
+        const el = document.createElement('div');
+        el.className = 'menu-item' + (group.expanded ? ' group-open' : '');
+        el.innerHTML = `
+            <span class="menu-text">${group.title}</span>
+            <span class="expand-icon">▶</span>
+            <span class="menu-tooltip">${group.title}</span>`;
+        container.appendChild(el);
+
+        const sub = document.createElement('div');
+        sub.className = 'submenu' + (group.expanded ? ' open' : '');
+        container.appendChild(sub);
+
+        el.addEventListener('click', () => {
+            group.expanded = !group.expanded;
+            el.classList.toggle('group-open', group.expanded);
+            sub.classList.toggle('open', group.expanded);
         });
 
-        function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            const icon = document.getElementById("sidebarToggleIcon");
-            
-            if (isMobile) {
-                sidebar.classList.toggle('mobile-open');
-                document.getElementById('mobileOverlay').classList.toggle('active');
-            } else {
-                if (currentSidebarState === 'expanded') {
-                    sidebar.classList.add('collapsed');
-                    icon.classList.remove('fa-chevron-left');
-                    icon.classList.add('fa-chevron-right');
-                    currentSidebarState = 'collapsed';
-                } else {
-                    sidebar.classList.remove('collapsed');
-                    icon.classList.remove('fa-chevron-right');
-                    icon.classList.add('fa-chevron-left');
-                    currentSidebarState = 'expanded';
-                }
-            }
-        }
-
-        function closeMobileSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            const overlay = document.getElementById('mobileOverlay');
-            
-            sidebar.classList.remove('mobile-open');
-            overlay.classList.remove('active');
-        }
-
-        function renderMenu() {
-            const menuContainer = document.getElementById('sidebarMenu');
-            menuContainer.innerHTML = '';
-
-            menuConfig.items.forEach(item => {
-                if (item.type === 'group') {
-                    renderMenuGroup(menuContainer, item);
-                } else {
-                    renderMenuItem(menuContainer, item);
-                }
+        (group.children || []).forEach(child => {
+            const si = document.createElement('div');
+            si.className = 'submenu-item';
+            si.textContent = child.title;
+            si.addEventListener('click', e => {
+                e.stopPropagation();
+                loadContent(child);
+                setActive(si);
+                if (isMobile) closeMobile();
             });
-        }
-
-        function renderMenuGroup(container, group) {
-            const groupItem = document.createElement('div');
-            groupItem.className = `menu-item ${group.expanded ? 'expanded' : ''}`;
-            groupItem.innerHTML = `
-                <span class="icon">${group.icon}</span>
-                <span class="text">${group.title}</span>
-                <span class="expand-icon">▶</span>
-                <div class="tooltip">${group.title}</div>
-            `;
-
-            groupItem.addEventListener('click', () => {
-                group.expanded = !group.expanded;
-                groupItem.classList.toggle('expanded', group.expanded);
-                submenu.classList.toggle('expanded', group.expanded);
-            });
-
-            container.appendChild(groupItem);
-
-            const submenu = document.createElement('div');
-            submenu.className = `submenu ${group.expanded ? 'expanded' : ''}`;
-
-            group.children.forEach(child => {
-                const submenuItem = document.createElement('div');
-                submenuItem.className = `submenu-item ${child.overlay ? 'overlay-enabled' : ''}`;
-                submenuItem.innerHTML = `<span class="text">${child.title}</span>`;
-
-                submenuItem.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    loadContent(child);
-                    updateActiveState(submenuItem);
-                    
-                    if (isMobile) {
-                        closeMobileSidebar();
-                    }
-                });
-
-                submenu.appendChild(submenuItem);
-            });
-
-            container.appendChild(submenu);
-        }
-
-        function renderMenuItem(container, item) {
-            const menuItem = document.createElement('div');
-            menuItem.className = 'menu-item';
-            menuItem.innerHTML = `
-                <span class="icon">${item.icon}</span>
-                <span class="text">${item.title}</span>
-                <div class="tooltip">${item.title}</div>
-            `;
-
-            menuItem.addEventListener('click', () => {
-                if (item.type === 'action') {
-                    if (item.action === 'showWelcome') {
-                        showWelcome();
-                    }
-                } else if (item.type === 'file') {
-                    loadContent(item);
-                }
-                updateActiveState(menuItem);
-                
-                if (isMobile) {
-                    closeMobileSidebar();
-                }
-            });
-
-            container.appendChild(menuItem);
-        }
-
-        function loadContent(item) {
-            const frame = document.getElementById('contentFrame');
-            const welcome = document.getElementById('welcomeState');
-            const loading = document.getElementById('loadingState');
-
-            welcome.style.display = 'none';
-            frame.style.display = 'none';
-            loading.style.display = 'flex';
-
-            setTimeout(() => {
-                frame.src = item.file;
-                currentAnalysisFrame = frame.contentWindow;
-                
-                frame.onload = () => {
-                    loading.style.display = 'none';
-                    frame.style.display = 'block';
-                    console.log(`✅ ${item.title} carregado v2.0`);
-                };
-
-                frame.onerror = () => {
-                    loading.style.display = 'none';
-                    welcome.style.display = 'flex';
-                    welcome.innerHTML = `
-                        <div class="welcome-icon" style="color: #ef4444;">❌</div>
-                        <h2 style="color: #ef4444;">Arquivo não encontrado</h2>
-                        <p>O arquivo "${item.file}" não foi encontrado.</p>
-                        <div style="background: #fef3c7; border: 1px solid #f59e0b; padding: 15px; border-radius: 8px; margin: 20px 0; color: #92400e;">
-                            <strong>💡 Dica:</strong> Use o <code>criar_dashboard_v2.py</code> 
-                            para gerar análises compatíveis.
-                        </div>
-                    `;
-                };
-            }, 300);
-        }
-
-        function showWelcome() {
-            const frame = document.getElementById('contentFrame');
-            const welcome = document.getElementById('welcomeState');
-            const loading = document.getElementById('loadingState');
-
-            frame.style.display = 'none';
-            loading.style.display = 'none';
-            welcome.style.display = 'flex';
-            currentAnalysisFrame = null;
-        }
-
-        function updateActiveState(activeElement) {
-            document.querySelectorAll('.menu-item.active, .submenu-item.active').forEach(el => {
-                el.classList.remove('active');
-            });
-            activeElement.classList.add('active');
-            currentMenuItem = activeElement;
-        }
-
-        function handleResize() {
-            const newIsMobile = window.innerWidth <= 768;
-            
-            if (newIsMobile !== isMobile) {
-                isMobile = newIsMobile;
-                
-                const sidebar = document.getElementById('sidebar');
-                const overlay = document.getElementById('mobileOverlay');
-                
-                if (isMobile) {
-                    sidebar.classList.remove('collapsed');
-                    sidebar.classList.remove('mobile-open');
-                    overlay.classList.remove('active');
-                } else {
-                    sidebar.classList.remove('mobile-open');
-                    overlay.classList.remove('active');
-                    if (currentSidebarState === 'collapsed') {
-                        sidebar.classList.add('collapsed');
-                    }
-                }
-            }
-        }
-
-        window.addEventListener('resize', handleResize);
-
-        document.addEventListener('DOMContentLoaded', () => {
-            renderMenu();
-            loadFirstMenuItem();
-            
-            console.log('🎯 Dashboard Master v2.0 carregado!');
+            sub.appendChild(si);
         });
+    }
 
-        function loadFirstMenuItem() {
-            // Procura o primeiro item que não é "home" (início)
-            for (let item of menuConfig.items) {
-                if (item.type === 'file' && item.file) {
-                    // Carrega primeiro arquivo individual
-                    loadContent(item);
-                    document.querySelector(`[data-id="${item.id}"]`)?.classList.add('active');
-                    return;
-                } else if (item.type === 'group' && item.children && item.children.length > 0) {
-                    // Carrega primeiro item do primeiro grupo
-                    const firstChild = item.children.find(child => child.file);
-                    if (firstChild) {
-                        loadContent(firstChild);
-                        
-                        // Expande o grupo e marca item ativo
-                        const groupElement = document.querySelector(`[data-id="${item.id}"]`);
-                        if (groupElement) {
-                            groupElement.classList.add('expanded');
-                            const childElement = document.querySelector(`[data-id="${firstChild.id}"]`);
-                            if (childElement) {
-                                childElement.classList.add('active');
-                            }
-                        }
-                        return;
-                    }
-                }
+    function renderItem(container, item) {
+        const el = document.createElement('div');
+        el.className = 'menu-item';
+        el.innerHTML = `
+            <span class="menu-text">${item.title}</span>
+            <span class="menu-tooltip">${item.title}</span>`;
+        el.addEventListener('click', () => {
+            if (item.type === 'action' && item.action === 'showWelcome') showWelcome();
+            else if (item.file) loadContent(item);
+            setActive(el);
+            if (isMobile) closeMobile();
+        });
+        container.appendChild(el);
+    }
+
+    function loadContent(item) {
+        const frame = document.getElementById('contentFrame');
+        const welcome = document.getElementById('welcomeState');
+        const loading = document.getElementById('loadingState');
+        welcome.style.display = 'none';
+        frame.style.display = 'none';
+        loading.style.display = 'flex';
+        setTimeout(() => {
+            frame.src = item.file;
+            currentAnalysisFrame = frame.contentWindow;
+            frame.onload = () => { loading.style.display='none'; frame.style.display='block'; };
+            frame.onerror = () => {
+                loading.style.display = 'none';
+                welcome.innerHTML = `<div class="error-state">
+                    <div style="font-size:36px">⚠️</div>
+                    <h2>Arquivo não encontrado</h2>
+                    <p>${item.file}</p></div>`;
+                welcome.style.display = 'flex';
+            };
+        }, 200);
+    }
+
+    function showWelcome() {
+        document.getElementById('contentFrame').style.display = 'none';
+        document.getElementById('loadingState').style.display = 'none';
+        document.getElementById('welcomeState').style.display = 'flex';
+        currentAnalysisFrame = null;
+    }
+
+    function setActive(el) {
+        document.querySelectorAll('.menu-item.active,.submenu-item.active').forEach(e => e.classList.remove('active'));
+        el.classList.add('active');
+    }
+
+    function sendCommand(cmd, data={}) {
+        if (currentAnalysisFrame) currentAnalysisFrame.postMessage({ source:'dashboard-master', type:cmd, data }, '*');
+    }
+
+    window.addEventListener('resize', () => { isMobile = window.innerWidth <= 768; });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        renderMenu();
+        // Auto-carregar primeiro item com arquivo
+        for (const item of menuConfig.items) {
+            if (item.file) { loadContent(item); return; }
+            if (item.type === 'group') {
+                const first = (item.children||[]).find(c => c.file);
+                if (first) { loadContent(first); return; }
             }
-            
-            // Fallback: se não encontrar nenhum item, esconde welcome e mostra tela vazia
-            const frame = document.getElementById('contentFrame');
-            const welcome = document.getElementById('welcomeState');
-            const loading = document.getElementById('loadingState');
-            
-            welcome.style.display = 'none';
-            frame.style.display = 'none';
-            loading.style.display = 'none';
         }
+        showWelcome();
+    });
 
-        function sendCommandToAnalysis(command, data = {}) {
-            if (currentAnalysisFrame) {
-                currentAnalysisFrame.postMessage({
-                    source: 'dashboard-master',
-                    type: command,
-                    data: data
-                }, '*');
-            }
-        }
-
-        window.dashboardDebug = {
-            stats: () => analysisStats,
-            sendCommand: sendCommandToAnalysis,
-            toggleSidebar: toggleSidebar,
-            showWelcome: showWelcome
-        };
-    </script>
+    window.dashboardDebug = { stats: () => analysisStats, sendCommand };
+</script>
 </body>
 </html>

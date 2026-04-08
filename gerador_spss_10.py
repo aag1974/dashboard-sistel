@@ -388,6 +388,11 @@ except ImportError:
 # Constantes
 CHART_LABEL_MAX = 15
 
+# Códigos numéricos tratados como missing em qualquer variável categórica/ordinal/scale.
+# -1 é a convenção mais comum em SPSS para "não se aplica" / missing declarado pelo usuário.
+# Adicione outros códigos aqui se necessário (ex.: 99, 999).
+USER_MISSING_CODES: set = {-1.0}
+
 # ========== FUNÇÕES DE UTILIDADE ==========
 
 def _try_import_ftfy():
@@ -1767,77 +1772,111 @@ class UniversalMRDetector:
 
 def detect_mr_groups_improved(selected_vars: List[str], meta, df) -> Tuple[Dict[str, Dict], List[str]]:
     """
-    VERSÃO 7.0 UNIVERSAL: Detecta grupos de múltipla resposta usando princípios estruturais.
-    
-    Esta função agora usa o UniversalMRDetector que funciona com qualquer base SPSS
-    de qualquer tipo de pesquisa, baseado em princípios estruturais universais.
+    Detecta grupos MR. Pre-detecta padrao _ON (slots de MR categorica)
+    antes de passar para o UniversalMRDetector.
     """
-    
-    # Configuração padrão (pode ser customizada para diferentes tipos de pesquisa)
+    import re as _re
+
+    valabs = get_value_labels_map(meta)
+
+    # ── PRÉ-DETECÇÃO: padrão PREFIX_O\d+ (ex: Q_25_O1~O5, Q_31_O1~O9) ──
+    slot_pattern = _re.compile(r'^(.+)_O(\d+)$', _re.IGNORECASE)
+    slot_buckets: Dict[str, List[str]] = {}
+    for v in selected_vars:
+        m = slot_pattern.match(v)
+        if m:
+            prefix = m.group(1)
+            slot_buckets.setdefault(prefix, []).append(v)
+
+    pre_detected: Dict[str, Dict] = {}
+    pre_detected_members: set = set()
+
+    for prefix, members in slot_buckets.items():
+        if len(members) < 2:
+            continue
+        # Ordenar pelos índices
+        members_sorted = sorted(members,
+            key=lambda v: int(slot_pattern.match(v).group(2)))
+
+        # Título: usar label do primeiro membro (sem o "[Other specify]" final)
+        raw_title = get_var_label(meta, members_sorted[0])
+        title = _re.sub(r'\s*\[.*?\]\s*$', '', raw_title).strip()
+
+        # Tipo: verificar se é binário (0/1) ou categórico por slots
+        mr_subtype = detect_mr_type_improved(members_sorted, meta, df) or 'categorical'
+
+        group_name = prefix
+        pre_detected[group_name] = {
+            "title": title,
+            "members": members_sorted,
+            "mr_subtype": mr_subtype,
+            "other_var": None,
+            "base": prefix,
+        }
+        pre_detected_members.update(members_sorted)
+        print(f"   🔗 Pré-detectado MR _O\\d+: {group_name} → {members_sorted} ({mr_subtype})")
+
+    # Remover membros já agrupados das vars passadas ao detector universal
+    remaining_vars = [v for v in selected_vars if v not in pre_detected_members]
+
+    # ── DETECTOR UNIVERSAL para o restante ──
     config = {
         'min_group_size': 2,
         'label_similarity_threshold': 0.7,
         'related_suffixes': {
             'medical': ['ass', 'assist', 'med', 'medic', 'saude'],
-            'other': ['other', 'outro', 'outra', 'outros', 'outras'],  # IMPORTANTE: other mantém no mesmo grupo
+            'other': ['other', 'outro', 'outra', 'outros', 'outras'],
             'text': ['text', 'txt', 'open', 'aberta'],
             'scale': ['esc', 'scale', 'escala'],
             'geographic': ['norte', 'sul', 'leste', 'oeste', 'north', 'south', 'east', 'west']
         }
     }
-    
-    # Criar detector universal
     detector = UniversalMRDetector(config)
-    
-    # Executar detecção estrutural
-    mr_groups, standalone = detector.detect_mr_groups(selected_vars, meta, df)
-    
-    # Converter para formato esperado pelo resto do código
-    converted_mr_groups = {}
-    
-    for group_name, group_info in mr_groups.items():
-        # Mapear tipos do sistema universal para tipos esperados
+    mr_groups_universal, standalone = detector.detect_mr_groups(remaining_vars, meta, df)
+
+    # Converter grupos universais para formato legado
+    converted_mr_groups: Dict[str, Dict] = {}
+
+    # Primeiro: pré-detectados (MR slot)
+    converted_mr_groups.update(pre_detected)
+
+    # Segundo: grupos do detector universal
+    for group_name, group_info in mr_groups_universal.items():
         mr_subtype_map = {
             'traditional_mr': 'categorical',
-            # battery_grid removido - não agrupamos mais baterias/grids
-            'independent_scales': 'rating_scale'  # Não deve chegar aqui, mas por segurança
+            'independent_scales': 'rating_scale'
         }
-        
         original_subtype = group_info.get('mr_subtype', 'categorical')
         mapped_subtype = mr_subtype_map.get(original_subtype, 'categorical')
 
-        # Ajuste critico: detectar MR checkbox (0/1) e marcar como 'binary'
-        # Caso contrario, a MR colapsa em categorias 'Selected'/'Not Selected' em vez de itens
         compat_type = detect_mr_type_improved(group_info.get('members', []), meta, df)
         if compat_type == 'binary':
             mapped_subtype = 'binary'
 
-        
-        # Verificar se há variável "other"
         base = group_info.get('base', '')
         other_var = None
-        
-        # Buscar variável other relacionada (mas NÃO incluir nos membros)
-        other_candidates = [f"{base}_other", f"{base}_outro", f"{base.split('_')[0]}_other"]
+        other_candidates = [f"{base}_other", f"{base}_outro",
+                            f"{base.split('_')[0]}_other"]
         for candidate in other_candidates:
             if candidate in df.columns and candidate not in group_info['members']:
                 other_var = candidate
-                # NÃO INCLUIR nos membros - other_var deve ser processada separadamente
-                print(f"   📝 Variável 'other' detectada (separada): {candidate}")
                 break
-        
+
         converted_mr_groups[group_name] = {
             "title": group_info['title'],
-            "members": group_info['members'],  # SEM incluir other_var
+            "members": group_info['members'],
             "mr_subtype": mapped_subtype,
-            "other_var": other_var,  # Referência separada para processamento
-            "base": base
+            "other_var": other_var,
+            "base": base,
         }
-    
+
+    # standalone: manter apenas vars não pré-detectadas
+    standalone = [v for v in standalone if v not in pre_detected_members]
+
     print(f"\n📊 CONVERSÃO PARA FORMATO LEGADO:")
     print(f"   Grupos MR convertidos: {len(converted_mr_groups)}")
     print(f"   Variáveis standalone: {len(standalone)}")
-    
+
     return converted_mr_groups, standalone
 
 def detect_mr_type_improved(group_vars: List[str], meta, df) -> str:
@@ -2047,6 +2086,18 @@ def detect_variables_universal(selected_vars, meta, valabs, df):
                 processed_vars.add(var)
                 continue
             
+            # ── DETECÇÃO DE _S ASSOCIADA ──
+            # Verificar se existe uma variável _S correspondente com respostas reais.
+            # Se sim, ela será absorvida dentro desta seção (não vira seção própria).
+            candidate_s = var + "_S"
+            open_text_var = None
+            if candidate_s in df.columns and candidate_s in standalone_vars:
+                real_vals = [v for v in df[candidate_s].dropna() if str(v).strip()]
+                if real_vals:
+                    open_text_var = candidate_s
+                    processed_vars.add(candidate_s)  # não processar como seção independente
+                    print(f"      📎 _S absorvida: {candidate_s} ({len(real_vals)} respostas)")
+            
             # Detectar tipo físico
             physical = detect_physical_type(meta, df, var)
             
@@ -2108,7 +2159,8 @@ def detect_variables_universal(selected_vars, meta, valabs, df):
                         "var_type": "categorical",
                         "measure": measure or "nominal",
                         "mr_subtype": None,
-                        "stats": None
+                        "stats": None,
+                        "open_text_var": open_text_var,
                     })
                     print(f"      ✅ Adicionado como {human} (Measure SPSS)")
 
@@ -2132,10 +2184,14 @@ def detect_variables_universal(selected_vars, meta, valabs, df):
     print(f"   Grupos MR detectados: {len(mr_groups)}")
     print(f"   Variáveis standalone: {len(standalone_vars)}")
     
+    # Numerar variáveis sequencialmente (P1, P2...)
+    for i, vm in enumerate(vars_meta):
+        vm["p_num"] = i + 1
+
     # Debug: mostrar ordem final CORRIGIDA
     print(f"\n✅ ORDEM FINAL PRESERVADA (CORRIGIDA):")
     for i, vm in enumerate(vars_meta):
-        print(f"   {i+1:2d}. {vm['name']} ({vm.get('var_type', vm['type'])})")
+        print(f"   {i+1:2d}. P{i+1} — {vm['name']} ({vm.get('var_type', vm['type'])})")
     
     return vars_meta, mr_groups
 
@@ -2434,6 +2490,16 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
                 rec[vname] = format_spss_date(val)
                 continue
             
+            # ========= _S absorvida: guardar texto no registro pai =========
+            otv = vm.get("open_text_var")
+            if otv and otv in df.columns:
+                txt = row.get(otv)
+                key = vname + "__open_text__"
+                if pd.notna(txt) and str(txt).strip():
+                    rec[key] = format_text_response(str(txt))
+                else:
+                    rec[key] = None
+            
             # ========= MULTIPLE RESPONSE =========
             if vtype == "multiple_response":
                 group = mr_groups.get(vname, {})
@@ -2453,16 +2519,20 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
                         if not mr_is_selected(val, vmap):
                             continue
                         option_text = get_mr1_label(meta, col)
+                        # Binary: fallback ao nome da variável
+                        if not option_text:
+                            option_text = get_var_label(meta, col)
+                        if not option_text:
+                            option_text = col
                     else:
-                        # MR por slots/categórica: basta estar preenchido (código ou texto)
+                        # MR por slots/categórica: basta estar preenchido
                         if not mr_is_filled(val, vmap):
                             continue
                         option_text = get_mr2_label(valabs, col, val)
-
-                    if not option_text:
-                        option_text = get_var_label(meta, col)
-                    if not option_text:
-                        option_text = col
+                        # Slot: se não há label para este valor, ignorar —
+                        # NUNCA usar o título da variável como categoria
+                        if not option_text:
+                            continue
 
                     option_text = str(option_text).strip()
                     if option_text and option_text not in chosen_options:
@@ -2491,17 +2561,22 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
                 rec[vname] = None
                 continue
             
-            # Categórico (nominal / ordinal)
+            # Tratar códigos de missing do usuário como ausente
+            # -1 é convenção comum em SPSS para "não se aplica" / missing declarado
+            try:
+                if float(val) in USER_MISSING_CODES:
+                    rec[vname] = None
+                    continue
+            except (ValueError, TypeError):
+                pass
+            
+            # Categórico (nominal / ordinal): sempre usar o LABEL
+            # VARS_VALUE_ORDER no JS também contém labels (não códigos),
+            # então armazenar o label garante que filtros E ordenação ordinal funcionem.
             if measure in ("nominal", "ordinal"):
-                if measure == "ordinal":
-                    # Para ordinais: manter o CÓDIGO original para ordenação correta
-                    processed_val = str(val).replace(":", "").strip()
-                    processed_val = _normalize_display_value(processed_val)
-                else:
-                    # Para nominais: usar o LABEL (comportamento original)
-                    label = safe_value_label_lookup(valabs, base_col, val)
-                    processed_val = str(label).replace(":", "").strip()
-                    processed_val = _normalize_display_value(processed_val)
+                label = safe_value_label_lookup(valabs, base_col, val)
+                processed_val = str(label).replace(":", "").strip()
+                processed_val = _normalize_display_value(processed_val)
                 rec[vname] = processed_val
                 continue
             
@@ -2572,7 +2647,268 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
         # Em caso de erro, não interromper o fluxo; apenas registrar no console.
         print(f"⚠️ Erro ao extrair palavras‑chave: {e}")
     
+    # ---------- DETECÇÃO AUTOMÁTICA DE SKIP LOGIC ----------
+    try:
+        _detect_skip_logic(vars_meta, records)
+    except Exception as e:
+        print(f"⚠️ Erro na detecção de skip logic: {e}")
+
     return created_at, vars_meta, filters_meta, records, value_orders, code_to_label
+
+# ========== DETECÇÃO DE SKIP LOGIC ==========
+
+def _detect_skip_logic(vars_meta: List[dict], records: List[dict]) -> None:
+    """
+    Detecta skip logic por taxa de resposta por categoria de Qx.
+    Para cada categoria de Qx, calcula qual % dos seus respondentes respondeu Qy.
+    Se há uma divisão clara (algumas categorias ≈100%, outras ≈0%), é skip logic.
+    Resultado embutido em varMeta['skip_logic']. Modifica vars_meta in-place.
+    """
+    HIGH = 0.85   # taxa de resposta mínima para categoria "incluída" no filtro
+    LOW  = 0.15   # taxa de resposta máxima para categoria "excluída"
+
+    total_records = len(records)
+    if total_records == 0:
+        return
+
+    # Pré-calcular respondentes de cada variável (índices onde valor não é None)
+    respondents: Dict[str, set] = {}
+    for vm in vars_meta:
+        vname = vm["name"]
+        vtype = vm.get("var_type") or vm.get("type") or "single"
+        if vtype == "multiple_response":
+            respondents[vname] = {i for i, r in enumerate(records)
+                                  if r.get(vname) and len(r.get(vname, [])) > 0}
+        else:
+            respondents[vname] = {i for i, r in enumerate(records)
+                                  if r.get(vname) is not None}
+
+    for qy_idx, vm_y in enumerate(vars_meta):
+        qy_name = vm_y["name"]
+        resp_qy = respondents[qy_name]
+        n_qy = len(resp_qy)
+
+        # Sem sentido se todos ou nenhum respondeu
+        if n_qy == 0 or n_qy == total_records:
+            continue
+
+        vtype_y = vm_y.get("var_type") or vm_y.get("type") or "single"
+        if vtype_y in ("string", "date"):
+            continue
+
+        # Varrer Qx anteriores (apenas categóricas simples)
+        for qx_idx in range(qy_idx):
+            vm_x = vars_meta[qx_idx]
+            qx_name = vm_x["name"]
+            vtype_x = vm_x.get("var_type") or vm_x.get("type") or "single"
+            if vtype_x in ("string", "date", "multiple_response"):
+                continue
+
+            # Para cada categoria de Qx: calcular taxa de resposta em Qy
+            # n_qx_cat = registros com esse valor de Qx
+            # n_resp    = desses, quantos responderam Qy
+            cat_counts: Dict[str, int] = {}    # total por categoria Qx
+            cat_resp:   Dict[str, int] = {}    # respondentes de Qy por categoria Qx
+
+            for i, rec in enumerate(records):
+                qx_val = rec.get(qx_name)
+                if qx_val is None:
+                    continue
+                key = str(qx_val).strip()
+                cat_counts[key] = cat_counts.get(key, 0) + 1
+                if i in resp_qy:
+                    cat_resp[key] = cat_resp.get(key, 0) + 1
+
+            if not cat_counts:
+                continue
+
+            # Classificar categorias por taxa de resposta
+            included, excluded, intermediate = [], [], []
+            for cat, total in cat_counts.items():
+                rate = cat_resp.get(cat, 0) / total
+                if rate >= HIGH:
+                    included.append(cat)
+                elif rate <= LOW:
+                    excluded.append(cat)
+                else:
+                    intermediate.append(cat)  # zona cinzenta → não é skip claro
+
+            # Skip logic detectado: há incluídas, excluídas, e nenhuma intermediária
+            if not included or not excluded or intermediate:
+                continue
+
+            # Cobertura: % dos respondentes de Qy que vieram das categorias incluídas
+            n_included_resp = sum(cat_resp.get(c, 0) for c in included)
+            coverage = round(n_included_resp / n_qy * 100, 1) if n_qy > 0 else 0.0
+
+            print(f"🔗 Skip logic detectado: {qy_name} ← {qx_name} "
+                  f"incluídas={included} excluídas={excluded} cobertura={coverage}%")
+
+            vm_y["skip_logic"] = {
+                "source_var":   qx_name,
+                "source_title": vm_x.get("title", qx_name),
+                "categories":   included,
+                "coverage":     coverage,
+                "n_filtered":   round(n_qy),
+                "n_total":      total_records,
+            }
+            break  # usar apenas a Qx anterior mais próxima que satisfaz
+
+# ========== DICIONÁRIO DE VARIÁVEIS ==========
+
+def generate_data_dictionary(vars_meta: List[dict], records: List[dict], meta, out_path: str) -> None:
+    """
+    Gera um Excel com duas abas:
+      1. Dicionário de Variáveis — uma linha por pergunta (compacto)
+      2. Categorias e Frequências — uma linha por categoria (expandido)
+    """
+    import openpyxl
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    vvl = getattr(meta, 'variable_value_labels', {}) or {}
+    labels_map = getattr(meta, 'column_names_to_labels', {}) or {}
+    USER_MISSING = {-1.0}
+    total = len(records)
+
+    def n_valid_rec(vname, vtype):
+        if vtype == 'multiple_response':
+            return sum(1 for r in records if r.get(vname) and len(r.get(vname, [])) > 0)
+        return sum(1 for r in records if r.get(vname) is not None)
+
+    def cats_summary(vm):
+        vname = vm['name']
+        vtype = vm.get('var_type') or vm.get('type', '')
+        if vtype == 'multiple_response':
+            freq: Dict[str, int] = {}
+            for r in records:
+                for opt in (r.get(vname) or []):
+                    if opt: freq[opt] = freq.get(opt, 0) + 1
+            return '; '.join(f"{k} ({v})" for k, v in sorted(freq.items(), key=lambda x: -x[1])[:6])
+        elif vtype in ('string', 'date'):
+            return ''
+        else:
+            col = vm.get('sheet_code', vname)
+            val_labels = vvl.get(col, {})
+            return '; '.join(
+                f"{int(k) if isinstance(k,float) and k==int(k) else k}={v}"
+                for k, v in list(val_labels.items())[:6]
+            )
+
+    def get_skip_source_p(vm):
+        sl = vm.get('skip_logic')
+        if not sl: return ''
+        src = sl.get('source_var', '')
+        for v in vars_meta:
+            if v['name'] == src and v.get('p_num'):
+                return f"P{v['p_num']}"
+        return sl.get('source_var', '')
+
+    # Estilos
+    BLUE_H  = PatternFill('solid', fgColor='1A3A5C')
+    BLUE_L  = PatternFill('solid', fgColor='E6F1FB')
+    ALT     = PatternFill('solid', fgColor='F8FAFC')
+    WHITE   = PatternFill('solid', fgColor='FFFFFF')
+
+    def thin():
+        s = Side(style='thin', color='D0D5DD')
+        return Border(left=s, right=s, top=s, bottom=s)
+
+    def apply_sheet(ws, headers, widths, rows):
+        for c, h in enumerate(headers, 1):
+            cell = ws.cell(1, c, h)
+            cell.fill = BLUE_H
+            cell.font = Font(bold=True, color='FFFFFF', size=10)
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = thin()
+        ws.row_dimensions[1].height = 28
+
+        for ri, row in enumerate(rows, 2):
+            for ci, val in enumerate(row, 1):
+                cell = ws.cell(ri, ci, val)
+                cell.fill = ALT if ri % 2 == 0 else WHITE
+                cell.font = Font(bold=(ci == 1), color='1A1A2E', size=10)
+                cell.alignment = Alignment(vertical='top', wrap_text=True)
+                cell.border = thin()
+            ws.row_dimensions[ri].height = 28
+
+        # Destacar col Nº
+        for ri in range(2, len(rows) + 2):
+            ws.cell(ri, 1).fill = BLUE_L
+            ws.cell(ri, 1).font = Font(bold=True, color='0C447C', size=10)
+
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        ws.freeze_panes = 'A2'
+        ws.auto_filter.ref = ws.dimensions
+
+    wb = openpyxl.Workbook()
+
+    # ── ABA 1: DICIONÁRIO ──
+    ws1 = wb.active
+    ws1.title = 'Dicionário de Variáveis'
+    rows1 = []
+    for vm in vars_meta:
+        pn  = f"P{vm.get('p_num','')}"
+        nv  = n_valid_rec(vm['name'], vm.get('var_type') or vm.get('type',''))
+        nm  = total - nv
+        rows1.append([
+            pn,
+            vm.get('sheet_code', vm['name']),
+            vm.get('title', ''),
+            vm.get('spss_type', ''),
+            nv,
+            nm,
+            f"{nm/total*100:.1f}%" if total else '—',
+            get_skip_source_p(vm),
+            cats_summary(vm),
+        ])
+    apply_sheet(ws1,
+        ['Nº','Variável SPSS','Pergunta','Tipo','N válidos','N missing','% missing','Filtrada por','Categorias / Opções'],
+        [8, 14, 48, 20, 10, 10, 10, 12, 55],
+        rows1)
+
+    # ── ABA 2: CATEGORIAS EXPANDIDAS ──
+    ws2 = wb.create_sheet('Categorias e Frequências')
+    rows2 = []
+    for vm in vars_meta:
+        pn    = f"P{vm.get('p_num','')}"
+        vname = vm['name']
+        vtype = vm.get('var_type') or vm.get('type', '')
+        col   = vm.get('sheet_code', vname)
+        title = vm.get('title', '')
+        spss  = vm.get('spss_type', '')
+        nv    = n_valid_rec(vname, vtype)
+
+        if vtype == 'multiple_response':
+            freq: Dict[str, int] = {}
+            for r in records:
+                for opt in (r.get(vname) or []):
+                    if opt: freq[opt] = freq.get(opt, 0) + 1
+            for opt, cnt in sorted(freq.items(), key=lambda x: -x[1]):
+                pct = f"{cnt/nv*100:.1f}%" if nv else '—'
+                rows2.append([pn, col, title, spss, '—', opt, cnt, pct])
+        elif vtype in ('string', 'date'):
+            rows2.append([pn, col, title, spss, '—', '(texto livre)', nv, '—'])
+        else:
+            val_labels = vvl.get(col, {})
+            freq2: Dict[str, int] = {}
+            for r in records:
+                v = r.get(vname)
+                if v is not None: freq2[str(v)] = freq2.get(str(v), 0) + 1
+            for code, lbl in val_labels.items():
+                code_str = str(int(code)) if isinstance(code, float) and code == int(code) else str(code)
+                cnt = freq2.get(lbl, 0)
+                pct = f"{cnt/nv*100:.1f}%" if nv and cnt else '0,0%'
+                rows2.append([pn, col, title, spss, code_str, lbl, cnt, pct])
+
+    apply_sheet(ws2,
+        ['Nº','Variável SPSS','Pergunta','Tipo','Código SPSS','Categoria / Opção','Frequência','%'],
+        [8, 14, 42, 20, 12, 42, 12, 10],
+        rows2)
+
+    wb.save(out_path)
+
 
 # ========== GERAÇÃO DE HTML ==========
 
@@ -2587,12 +2923,27 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
     value_orders_js = json.dumps(value_orders, ensure_ascii=False)
     code_to_label_js = json.dumps(code_to_label, ensure_ascii=False)
 
+    # Formatação de data para nome do arquivo
+    from datetime import datetime
+    try:
+        # Tentar extrair data de created_at ou usar data atual
+        data_formatada = datetime.now().strftime("%d-%m-%Y")
+        if created_at:
+            # Se created_at tem formato específico, tentar parseá-lo
+            data_formatada = datetime.now().strftime("%d-%m-%Y")
+    except:
+        data_formatada = datetime.now().strftime("%d-%m-%Y")
+    
+    # Nome base do arquivo sem extensão
+    nome_arquivo = file_source.replace('.sav', '').replace('.SAV', '')
+    titulo_pdf = f"Relatorio de resultados_{nome_arquivo}_{data_formatada}"
+    
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard SPSS Universal</title>
+    <title>{titulo_pdf}</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -2633,144 +2984,164 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             color: var(--text);
             line-height: 1.6;
             padding: 15px;
-            padding-top: 140px; /* Aumentado de 100px para 140px */
+            padding-top: 68px;
         }}
 
+        /* ===== BARRA DE FILTROS COMPACTA ===== */
         .filters-container {{
             background: white;
-            border-radius: 0;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            border: none;
-            border-bottom: 1px solid var(--border);
-
+            border-bottom: 0.5px solid var(--border);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.07);
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
+            top: 0; left: 0; right: 0;
             z-index: 9999;
             width: 100%;
+        }}
 
-            margin-bottom: 0;
+        .filters-bar {{
+            display: flex;
+            align-items: stretch;
+            height: 52px;
+            padding: 0 20px;
         }}
-        /* Painel de filtros colapsável */
-        .filters-container.collapsed .filters-grid {{
-            display: none;
-        }}
-        .filters-toggle {{
-            width: 28px;
-            height: 28px;
-            padding: 0;
-            border: none;
-            background: transparent;
-            color: #666;
-            display: inline-flex;
+
+        .filter-bar-label {{
+            display: flex;
             align-items: center;
+            padding-right: 16px;
+            border-right: 0.5px solid var(--border);
+            margin-right: 16px;
+            flex-shrink: 0;
+            font-size: 10px;
+            font-weight: 700;
+            color: #999;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }}
+
+        .filters-inline {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            overflow: visible;
+        }}
+
+        .filter-col {{
+            display: flex;
+            flex-direction: column;
             justify-content: center;
-            border-radius: 6px;
-            cursor: pointer;
+            gap: 2px;
+            flex: 1;
+            min-width: 80px;
         }}
 
-        .filters-toggle:hover {{
-            background: #f0f4f8;
-            color: #333;
+        .filter-col-label {{
+            font-size: 9px;
+            color: #aaa;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }}
 
-        .filters-toggle:focus-visible {{
-            outline: 2px solid rgba(74, 144, 226, 0.35);
-            outline-offset: 2px;
-        }}
-
-        .filters-toggle .chev {{
-            font-size: 14px;
-            line-height: 1;
-        }}
-
-        .content {{
-            margin-top: 40px; /* Aumentado de 30px para 40px para maior segurança */
-        }}
-
-        .filters-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 20px; /* Reduzido de 16px para 12px */
-            background: #f8f9fa;
-            border-bottom: 1px solid var(--border);
-            border-radius: 0;
-        }}
-
-        .filter-title {{
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--text);
-            margin: 0;
-        }}
-
-        .filter-actions {{
-            display: flex;
-            gap: 8px;
-        }}
-
-        .filter-btn {{
-            padding: 8px 16px;
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            background: white;
-        }}
-
-        .apply-btn {{
-            background: var(--success);
-            color: white;
-            border-color: var(--success);
-        }}
-
-        .apply-btn:hover {{
-            background: #45a049;
-            border-color: #45a049;
-        }}
-
-        .clear-btn {{
+        .filter-col-select {{
+            font-size: 12px;
+            padding: 3px 22px 3px 7px;
+            border: 0.5px solid #ddd;
+            border-radius: 5px;
             background: #f8f9fa;
             color: var(--text);
+            cursor: pointer;
+            height: 26px;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 6px center;
+            transition: border-color 0.15s;
+            width: 100%;
         }}
 
-        .clear-btn:hover {{
-            background: #e9ecef;
-        }}
-
-        .export-btn {{
-            background: var(--primary);
-            color: white;
+        .filter-col-select:focus {{
+            outline: none;
             border-color: var(--primary);
         }}
 
-        .export-btn:hover {{
-            background: var(--primary-dark);
-            border-color: var(--primary-dark);
-        }}
+        .icon-btn.apply {{ color: #4CAF50; }}
+        .icon-btn.apply:hover {{ background: #E8F5E9; color: #388E3C; }}
+        .icon-btn.clear {{ color: #FF7043; }}
+        .icon-btn.clear:hover {{ background: #FBE9E7; color: #E64A19; }}
+        .icon-btn.excel {{ color: #217346; }}
+        .icon-btn.excel:hover {{ background: #E8F5E9; color: #155c35; }}
+        .icon-btn.pdf {{ color: #D32F2F; }}
+        .icon-btn.pdf:hover {{ background: #FFEBEE; color: #b71c1c; }}
 
-        .filters-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            padding: 16px 20px; /* Reduzido de 20px para 16px */
-        }}
-
-        .filter-group {{
+        .filter-bar-actions {{
             display: flex;
-            flex-direction: column;
-            gap: 8px;
+            align-items: center;
+            gap: 2px;
+            padding-left: 14px;
+            border-left: 0.5px solid var(--border);
+            margin-left: 4px;
+            flex-shrink: 0;
         }}
 
-        .filter-label {{
-            font-weight: 600;
-            color: var(--text);
-            font-size: 13px;
-            margin-bottom: 4px;
+        .icon-btn {{
+            width: 34px;
+            height: 34px;
+            border-radius: 7px;
+            border: none;
+            background: transparent;
+            color: #bbb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            position: relative;
+        }}
+
+        .icon-btn:hover {{
+            background: #f1f3f5;
+            color: #444;
+        }}
+
+        .icon-btn svg {{
+            width: 15px;
+            height: 15px;
+        }}
+
+        .icon-btn .icon-tooltip {{
+            display: none;
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #222;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 400;
+            padding: 4px 9px;
+            border-radius: 5px;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 10000;
+        }}
+
+        .icon-btn:hover .icon-tooltip {{
+            display: block;
+        }}
+
+        .icon-btn.loading {{
+            opacity: 0.45;
+            pointer-events: none;
+        }}
+
+        .content {{
+            margin-top: 0;
         }}
 
         .custom-dropdown {{
@@ -2812,7 +3183,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             max-height: 200px;
             overflow-y: auto;
-            z-index: 1000;
+            z-index: 99999;
             display: none;
             margin-top: 2px;
         }}
@@ -2893,6 +3264,81 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         .section-subtitle {{
             font-size: 13px;
             color: #6c757d;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }}
+
+        .type-pill {{
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 9px;
+            background: #f1f3f5;
+            border: 0.5px solid #dde0e3;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #6c757d;
+            white-space: nowrap;
+        }}
+
+        .skip-tag {{
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 9px;
+            background: #FAEEDA;
+            border: 0.5px solid #BA7517;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #633806;
+            cursor: default;
+            white-space: nowrap;
+            vertical-align: middle;
+            margin-left: 4px;
+        }}
+
+        .skip-tag .skip-tooltip {{
+            display: none;
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 13px;
+            font-size: 12px;
+            font-weight: 400;
+            color: #6c757d;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+            z-index: 100;
+            line-height: 1.7;
+            min-width: 220px;
+        }}
+
+        .skip-tag .skip-tooltip strong {{
+            color: var(--text);
+            font-weight: 600;
+        }}
+
+        .skip-tag .skip-tooltip .skip-pill {{
+            display: inline-block;
+            padding: 1px 7px;
+            background: #FAEEDA;
+            border: 0.5px solid #BA7517;
+            border-radius: 20px;
+            font-size: 11px;
+            color: #633806;
+            font-weight: 600;
+            margin: 2px 2px 0 0;
+        }}
+
+        .skip-tag:hover .skip-tooltip {{
+            display: block;
         }}
 
         .section-content {{
@@ -2932,19 +3378,167 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             font-size: 13px;
         }}
 
-        .percent-bar {{
-            background: #f1f3f4;
-            border-radius: 4px;
-            height: 18px;
+        /* ===== IVV-STYLE INLINE BAR TABLE ===== */
+        .ivv-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            table-layout: fixed;
+        }}
+
+        .ivv-table th {{
+            background: #f8f9fa;
+            font-weight: 600;
+            font-size: 12px;
+            color: #6c757d;
+            padding: 8px 10px;
+            border-bottom: 2px solid var(--border);
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+
+        .ivv-table td {{
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            vertical-align: middle;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+
+        .ivv-table tr.ivv-row {{
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }}
+
+        .ivv-table tr.ivv-row:hover {{
+            background: #f0f4ff;
+        }}
+
+        .ivv-table tr.ivv-row.drilldown-active {{
+            background: #dbeafe;
+        }}
+
+        .ivv-table tr.ivv-total-row td {{
+            font-weight: 600;
+            background: #f8f9fa;
+            border-top: 2px solid var(--border);
+            border-bottom: none;
+        }}
+
+        .ivv-bar-cell {{
             position: relative;
+            min-width: 100px;
+        }}
+
+        .ivv-bar-bg {{
+            position: absolute;
+            top: 4px;
+            bottom: 4px;
+            left: 0;
+            border-radius: 3px;
+            background: var(--primary);
+            opacity: 0.15;
+            transition: width 0.5s ease, opacity 0.2s ease;
+        }}
+
+        .ivv-bar-val {{
+            position: relative;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text);
+        }}
+
+        .ivv-pct-col {{
+            text-align: right;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--primary-dark);
+            white-space: nowrap;
+        }}
+
+        .ivv-base-col {{
+            text-align: right;
+            font-size: 12px;
+            color: #6c757d;
+            white-space: nowrap;
+        }}
+
+        .ivv-label-col {{
+            width: 45%;
+        }}
+
+        .ivv-drilldown-hint {{
+            font-size: 11px;
+            color: #6c757d;
+            margin-top: 8px;
+            font-style: italic;
+        }}
+
+        .outros-sub {{
+            margin: 12px 0 4px;
+            border: 0.5px solid rgba(186,117,23,0.3);
+            border-radius: 8px;
             overflow: hidden;
         }}
 
-        .percent-fill {{
-            background: linear-gradient(90deg, var(--primary), var(--primary-dark));
-            height: 100%;
-            transition: width 0.8s ease;
+        .outros-sub-header {{
+            background: rgba(250,238,218,0.5);
+            padding: 7px 12px;
+            border-bottom: 0.5px solid rgba(186,117,23,0.2);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
         }}
+
+        .outros-sub-label {{
+            font-size: 11px;
+            font-weight: 600;
+            color: #854F0B;
+        }}
+
+        .outros-sub-n {{
+            font-size: 11px;
+            color: #BA7517;
+            background: #FAEEDA;
+            padding: 1px 7px;
+            border-radius: 20px;
+        }}
+
+        .outros-kw {{
+            padding: 2px 7px;
+            background: #f1f3f5;
+            border: 0.5px solid #ddd;
+            border-radius: 20px;
+            font-size: 11px;
+            color: #6c757d;
+            cursor: pointer;
+        }}
+
+        .outros-kw.active {{
+            background: #dbeafe;
+            border-color: #93c5fd;
+            color: #1e40af;
+            font-weight: 600;
+        }}
+
+        .outros-list {{
+            padding: 6px 12px;
+            max-height: 160px;
+            overflow-y: auto;
+        }}
+
+        .outros-item {{
+            font-size: 12px;
+            color: #6c757d;
+            padding: 4px 0;
+            border-bottom: 0.5px solid var(--border);
+        }}
+
+        .outros-item:last-child {{ border-bottom: none; }}
 
         /* Responsivo */
         @media (max-width: 768px) {{
@@ -2986,20 +3580,30 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 </head>
 <body>
     <div class="filters-container">
-        <div class="filters-header">
-            <h2 class="filter-title">🔍 Filtros de Seleção</h2>
-            <div class="filter-actions">
-                <button class="filters-toggle" id="toggleFiltersBtn" onclick="toggleFiltersPanel()" title="Recolher/expandir filtros" aria-label="Recolher/expandir filtros">
-                    <span class="chev" id="toggleFiltersChev">▴</span>
-                </button>
-                <button class="filter-btn apply-btn" onclick="applyFilters()">✓ Aplicar</button>
-                <button class="filter-btn clear-btn" onclick="clearFilters()">🔄 Limpar</button>
-                <button class="filter-btn export-btn" onclick="exportAllTables()">📊 Excel</button>
-                <button class="filter-btn export-btn" onclick="exportToPDF()">📄 PDF</button>
+        <div class="filters-bar">
+            <span class="filter-bar-label">Filtrar</span>
+            <div class="filters-inline" id="filtersGrid">
+                <!-- Filtros gerados dinamicamente -->
             </div>
-        </div>
-        <div class="filters-grid" id="filtersGrid">
-            <!-- Filtros gerados dinamicamente -->
+            <div class="filter-bar-actions">
+                <button class="icon-btn apply" onclick="applyFilters()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5,8.5 6,12 13.5,4"/></svg>
+                    <span class="icon-tooltip">Aplicar filtros</span>
+                </button>
+                <button class="icon-btn clear" onclick="clearFilters()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3.5" y1="3.5" x2="12.5" y2="12.5"/><line x1="12.5" y1="3.5" x2="3.5" y2="12.5"/></svg>
+                    <span class="icon-tooltip">Limpar filtros</span>
+                </button>
+                <div class="icon-btn-sep"></div>
+                <button class="icon-btn excel" onclick="exportAllTables()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="2"/><line x1="6" y1="2" x2="6" y2="14"/><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="10" x2="14" y2="10"/></svg>
+                    <span class="icon-tooltip">Exportar Excel</span>
+                </button>
+                <button class="icon-btn pdf" onclick="exportToPDF()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h6l4 4v8a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z"/><polyline points="10,2 10,6 14,6"/><line x1="5" y1="10" x2="11" y2="10"/><line x1="5" y1="12.5" x2="9" y2="12.5"/></svg>
+                    <span class="icon-tooltip">Exportar PDF</span>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -3047,43 +3651,10 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         let charts = {{}};
 
         
-        // Painel de filtros (colapsável)
-        function setFiltersPanelCollapsed(collapsed) {{
-            const panel = document.querySelector('.filters-container');
-            if (!panel) return;
-
-            panel.classList.toggle('collapsed', !!collapsed);
-
-            const chev = document.getElementById('toggleFiltersChev');
-            if (chev) {{
-                chev.textContent = panel.classList.contains('collapsed') ? '▾' : '▴';
-            }}
-        }}
-
-        function toggleFiltersPanel() {{
-            const panel = document.querySelector('.filters-container');
-            if (!panel) return;
-            const next = !panel.classList.contains('collapsed');
-            setFiltersPanelCollapsed(next);
-            try {{
-                localStorage.setItem('filtersCollapsed', next ? '1' : '0');
-            }} catch (e) {{ /* ignore */ }}
-        }}
-
-        function restoreFiltersPanelState() {{
-            let collapsed = false;
-            try {{
-                collapsed = (localStorage.getItem('filtersCollapsed') === '1');
-            }} catch (e) {{ /* ignore */ }}
-            setFiltersPanelCollapsed(collapsed);
-        }}
-
-// INICIALIZAÇÃO
+        // INICIALIZAÇÃO
         document.addEventListener('DOMContentLoaded', function() {{
             console.log('🌍 Dashboard SPSS Universal carregado');
             console.log('📊 ' + VARS_META.length + ' variáveis, ' + FILTERS.length + ' filtros, ' + RECORDS.length + ' registros');
-            
-            restoreFiltersPanelState();
             buildFilters();
             renderAll();
         }});
@@ -3092,51 +3663,84 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         function buildFilters() {{
             const container = document.getElementById('filtersGrid');
             if (!container) return;
-            
             container.innerHTML = '';
-            
-            if (FILTERS.length === 0) {{
-                container.innerHTML = '<p style="color: #999; font-style: italic;">Nenhum filtro disponível</p>';
-                return;
-            }}
-            
+
+            if (FILTERS.length === 0) return;
+
             FILTERS.forEach(f => {{
                 const filterGroup = document.createElement('div');
-                filterGroup.className = 'filter-group';
-                
-                const label = document.createElement('label');
-                label.className = 'filter-label';
+                filterGroup.className = 'filter-col';
+
+                const label = document.createElement('span');
+                label.className = 'filter-col-label';
                 label.textContent = f.title;
                 filterGroup.appendChild(label);
-                
+
                 const dropdownContainer = document.createElement('div');
                 dropdownContainer.className = 'custom-dropdown';
-                
+
                 const dropdownButton = document.createElement('div');
-                dropdownButton.className = 'dropdown-button';
+                dropdownButton.className = 'dropdown-button filter-col-select';
+                dropdownButton.style.cssText = 'display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;';
                 dropdownButton.onclick = () => toggleDropdown(f.name);
-                dropdownButton.innerHTML = '<span id="' + f.name + 'Text">Todos</span><span class="arrow">▼</span>';
-                
+                dropdownButton.innerHTML = '<span id="' + f.name + 'Text">Todos</span><span style="font-size:9px;color:#999">▼</span>';
+
                 const dropdownContent = document.createElement('div');
                 dropdownContent.className = 'dropdown-content';
                 dropdownContent.id = f.name + 'Content';
-                
+
                 const selectAllOption = document.createElement('div');
                 selectAllOption.className = 'dropdown-option select-all';
                 selectAllOption.innerHTML = '<input type="checkbox" onchange="selectAllOptions(\\'' + f.name + '\\')"><label>Selecionar Todos</label>';
                 dropdownContent.appendChild(selectAllOption);
-                
+
                 f.values.forEach(value => {{
                     const option = document.createElement('div');
                     option.className = 'dropdown-option';
-                    option.innerHTML = '<input type="checkbox" value="' + value + '" onchange="updateDropdownText(\\'' + f.name + '\\')"><label>' + value + '</label>';
+                    option.dataset.filterName = f.name;
+                    option.dataset.filterValue = value;
+                    option.innerHTML = '<input type="checkbox" value="' + value + '" onchange="updateDropdownText(\\'' + f.name + '\\'); updateFilterCounts()"><label>' + value + ' <span class="filter-count" style="color:#aaa;font-size:11px"></span></label>';
                     dropdownContent.appendChild(option);
                 }});
-                
+
                 dropdownContainer.appendChild(dropdownButton);
                 dropdownContainer.appendChild(dropdownContent);
                 filterGroup.appendChild(dropdownContainer);
                 container.appendChild(filterGroup);
+            }});
+
+            // Contagens iniciais
+            updateFilterCounts();
+        }}
+
+        function updateFilterCounts() {{
+            // Para cada filtro, calcular contagem excluindo o próprio filtro (cross-filter)
+            FILTERS.forEach(f => {{
+                const content = document.getElementById(f.name + 'Content');
+                if (!content) return;
+
+                // Records filtrados excluindo este filtro
+                const crossRecords = getFilteredRecords(f.name);
+
+                // Contar por categoria
+                const counts = {{}};
+                crossRecords.forEach(r => {{
+                    const v = r[f.name];
+                    if (v !== null && v !== undefined && String(v).trim() !== '') {{
+                        const k = String(v).trim();
+                        counts[k] = (counts[k] || 0) + 1;
+                    }}
+                }});
+
+                // Atualizar spans de contagem
+                content.querySelectorAll('.dropdown-option:not(.select-all)').forEach(opt => {{
+                    const val = opt.dataset.filterValue;
+                    const span = opt.querySelector('.filter-count');
+                    if (span) {{
+                        const n = counts[val] || 0;
+                        span.textContent = n > 0 ? '(' + n + ')' : '(0)';
+                    }}
+                }});
             }});
         }}
 
@@ -3197,6 +3801,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             document.querySelectorAll('.dropdown-content').forEach(d => d.classList.remove('show'));
             document.querySelectorAll('.dropdown-button').forEach(b => b.classList.remove('open'));
             renderAll();
+            updateFilterCounts();
         }}
 
         // ===== DRILLDOWN (clique em barras) =====
@@ -3220,7 +3825,25 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             else s.add(k);
 
             if (s.size === 0) DRILLDOWN.delete(varName);
+
+            // Capturar posição visual do card antes do re-render
+            const anchorId = 'section-' + varName;
+            const anchorBefore = document.getElementById(anchorId);
+            const topBefore = anchorBefore ? anchorBefore.getBoundingClientRect().top : null;
+
             renderAll();
+
+            // Após render: ajustar scroll para manter o card na mesma posição visual
+            requestAnimationFrame(() => {{
+                const anchorAfter = document.getElementById(anchorId);
+                if (anchorAfter && topBefore !== null) {{
+                    const topAfter = anchorAfter.getBoundingClientRect().top;
+                    const delta = topAfter - topBefore;
+                    if (Math.abs(delta) > 1) {{
+                        window.scrollBy({{ top: delta, behavior: 'instant' }});
+                    }}
+                }}
+            }});
         }}
 
         function clearAllDrilldowns() {{
@@ -3238,6 +3861,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             document.querySelectorAll('.dropdown-content').forEach(d => d.classList.remove('show'));
             document.querySelectorAll('.dropdown-button').forEach(b => b.classList.remove('open'));
             renderAll();
+            updateFilterCounts();
         }}
 
         function getFilteredRecords(excludeVarName = null) {{
@@ -3293,7 +3917,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             VARS_META.forEach((varMeta, index) => {{
                 const recordsForVar = getFilteredRecords(varMeta.name);
                 const section = createSection(varMeta, recordsForVar);
-                content.appendChild(section);
+                if (section) content.appendChild(section);
             }});
         }}
 
@@ -3315,8 +3939,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 .filter(v => v !== '');
 
             if (validResponses.length === 0) {{
-                container.innerHTML = '<p style="color: #999; font-style: italic;">Nenhuma resposta encontrada</p>';
-                return container;
+                return null;
             }}
 
             // ✅ DEBUG: Verificar ordem das respostas
@@ -3537,8 +4160,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             }});
 
             if (weightedValues.length === 0) {{
-                container.innerHTML = '<p style="color: #999; font-style: italic;">Nenhum valor numérico válido encontrado</p>';
-                return container;
+                return null;
             }}
 
             const stats = varMeta.stats || {{}};
@@ -3672,9 +4294,11 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
             const entries = Object.entries(freq);
             if (entries.length === 0) {{
-                container.innerHTML = '<p style="color: #999; font-style: italic;">Nenhuma data válida encontrada</p>';
-                return container;
+                return null;
             }}
+
+            // ✅ DEBUG: Verificar ordem das categorias
+            console.log(`📊 ${{varMeta.name}}: Categorias encontradas:`, entries.map(([label]) => label));
 
             // ✅ REGRA CORRETA: Datas ordenadas cronologicamente
             entries.sort((a, b) => new Date(a[0]) - new Date(b[0]));
@@ -3756,24 +4380,28 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         function renderCategoricalVariable(varMeta, records) {{
             const container = document.createElement('div');
             const freq = {{}};
-            let validCount = 0;
+            let validCount = 0;      // respondentes com pelo menos 1 resposta válida
+            let totalSelections = 0; // soma de todas as opções marcadas (só MR)
 
             // Conta frequências
             records.forEach(r => {{
                 let v = r[varMeta.name];
-                const weight = r.__weight__ || 1.0;  // Peso do registro
+                const weight = r.__weight__ || 1.0;
                 
                 if (Array.isArray(v)) {{
-                    // MR
+                    // MR: contar o respondente UMA VEZ (base = respondentes)
+                    let hasValid = false;
                     v.forEach(item => {{
                         if (item !== null && item !== undefined && String(item).trim() !== '') {{
                             const key = String(item).trim();
                             freq[key] = (freq[key] || 0) + weight;
-                            validCount += weight;
+                            totalSelections += weight;
+                            hasValid = true;
                         }}
                     }});
+                    if (hasValid) validCount += weight; // incrementa uma vez por respondente
                 }} else {{
-                    // Categórica simples
+                    // Categórica simples: continua igual
                     if (v !== null && v !== undefined && String(v).trim() !== '') {{
                         const key = String(v).trim();
                         freq[key] = (freq[key] || 0) + weight;
@@ -3782,10 +4410,9 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 }}
             }});
 
-            const entries = Object.entries(freq);
+            const entries = Object.entries(freq).filter(([key]) => key !== '-1' && key !== '-1.0');
             if (entries.length === 0) {{
-                container.innerHTML = '<p style="color:#999;font-style:italic;">Nenhum dado disponível</p>';
-                return container;
+                return null;
             }}
 
             // ✅ DEBUG: Verificar ordem das categorias
@@ -3835,118 +4462,158 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             const counts = entries.map(([,count]) => count);
             const percentages = counts.map(count => validCount > 0 ? (count / validCount * 100) : 0);
             
-            // ✅ AJUSTE DINÂMICO: Eixo Y se adapta ao valor máximo
-            const maxPercentage = Math.max(...percentages);
-            const yAxisMax = maxPercentage > 0
-                ? Math.min(100, Math.ceil(maxPercentage / 10) * 10)
-                : 100;
-
-            // ----- Gráfico -----
-            const chartContainer = document.createElement('div');
-            chartContainer.className = 'chart-container';
-            
-            const canvas = document.createElement('canvas');
-            chartContainer.appendChild(canvas);
-            const ctx = canvas.getContext('2d');
-
-            // Drilldown: chaves 'raw' alinhadas às barras
-            const rawKeys = entries.map(([k]) => _norm(k));
+            // ===== IVV-STYLE INLINE BAR TABLE =====
+            const isMR = (varType === 'multiple_response' || varMeta.type === 'mr');
             const sel = DRILLDOWN.get(varMeta.name) || new Set();
-            const hasSel = sel.size > 0;
 
-            const bgColors = rawKeys.map(k => {{
-                if (!hasSel) return 'rgba(74, 144, 226, 0.7)';
-                return sel.has(k) ? 'rgba(74, 144, 226, 0.85)' : 'rgba(74, 144, 226, 0.20)';
-            }});
-            const borderColors = rawKeys.map(k => {{
-                if (!hasSel) return 'rgba(74, 144, 226, 1)';
-                return sel.has(k) ? 'rgba(74, 144, 226, 1)' : 'rgba(74, 144, 226, 0.35)';
-            }});
+            // Maior percentual para escalar as barras
+            const maxPct = Math.max(...percentages, 1);
 
-            new Chart(ctx, {{
-                type: 'bar',
-                data: {{
-                    labels: labels.map(label => wrapLabel(label, CHART_LABEL_MAX)),
-                    datasets: [{{
-                        data: percentages,
-                        backgroundColor: bgColors,
-                        borderColor: borderColors,
-                        borderWidth: 1
-                    }}]
-                }},
-                options: {{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    onClick: function(evt, elements) {{
-                        if (!elements || elements.length === 0) return;
-                        const idx = elements[0].index;
-                        toggleDrilldown(varMeta.name, rawKeys[idx]);
-                    }},
-                    plugins: {{
-                        legend: {{ display: false }},
-                        tooltip: {{
-                            callbacks: {{
-                                label: function(context) {{
-                                    const index = context.dataIndex;
-                                    const qty = Math.round(counts[index]);  // Arredondar para inteiro
-                                    const pct = context.parsed.y;
-                                    return `${{formatBR(pct, 1)}}% (${{qty}} casos)`;
-                                }}
-                            }}
-                        }}
-                    }},
-                    scales: {{
-                        y: {{
-                            beginAtZero: true,
-                            max: yAxisMax,
-                            ticks: {{
-                                callback: function(value) {{
-                                    return value + '%';
-                                }}
-                            }}
-                        }}
-                    }}
-                }}
-            }});
-
-            // ----- Tabela -----
             const table = document.createElement('table');
-            table.className = 'table-categorical';
+            table.className = 'ivv-table';
 
-            const header = document.createElement('tr');
-            header.innerHTML = '<th>Categoria</th><th>Frequência</th><th>%</th>';
-            table.appendChild(header);
+            // Cabeçalho
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            if (isMR) {{
+                headerRow.innerHTML = '<th class="ivv-label-col">Respostas</th><th>Frequência</th><th class="ivv-pct-col">%/Respondentes</th><th class="ivv-base-col">Respondentes</th>';
+            }} else {{
+                headerRow.innerHTML = '<th class="ivv-label-col">Respostas</th><th>Frequência</th><th class="ivv-pct-col">%</th>';
+            }}            thead.appendChild(headerRow);
+            table.appendChild(thead);
 
-            entries.forEach(([label, count]) => {{
-                const pct = validCount > 0 ? formatBR(count / validCount * 100, 1) : '0,0';
-                
-                // Usar label descritivo se disponível
-                let displayLabel = label;
-                if (CODE_TO_LABEL[varMeta.name] && CODE_TO_LABEL[varMeta.name][label]) {{
-                    displayLabel = CODE_TO_LABEL[varMeta.name][label];
+            const tbody = document.createElement('tbody');
+
+            entries.forEach(([rawLabel, count], idx) => {{
+                const rawKey = _norm(rawLabel);
+                const isActive = sel.has(rawKey);
+                const pct = validCount > 0 ? count / validCount * 100 : 0;
+                const pctFmt = formatBR(pct, 1) + '%';
+                const barWidth = (pct / maxPct * 100).toFixed(1);
+
+                let displayLabel = rawLabel;
+                if (CODE_TO_LABEL[varMeta.name] && CODE_TO_LABEL[varMeta.name][rawLabel]) {{
+                    displayLabel = CODE_TO_LABEL[varMeta.name][rawLabel];
                 }}
-                
+
                 const row = document.createElement('tr');
-                row.innerHTML = `<td>${{displayLabel}}</td><td>${{Math.round(count)}}</td><td>${{pct}}%</td>`;
-                table.appendChild(row);
+                row.className = 'ivv-row' + (isActive ? ' drilldown-active' : '');
+                row.title = 'Clique para filtrar por esta categoria';
+
+                // Célula de frequência com barra embutida
+                // Barra na célula de percentual, valor absoluto na frequência simples
+                const barCellHTML = `
+                    <td>${{Math.round(count)}}</td>
+                    <td class="ivv-bar-cell">
+                        <div class="ivv-bar-bg" style="width:${{barWidth}}%"></div>
+                        <div class="ivv-bar-val ivv-pct-col">${{pctFmt}}</div>
+                    </td>`;
+
+                if (isMR) {{
+                    row.innerHTML = `<td>${{displayLabel}}</td>${{barCellHTML}}<td class="ivv-base-col">${{Math.round(validCount)}}</td>`;
+                }} else {{
+                    row.innerHTML = `<td>${{displayLabel}}</td>${{barCellHTML}}`;
+                }}
+
+                // Drilldown por clique na linha
+                row.addEventListener('click', () => toggleDrilldown(varMeta.name, rawKey));
+
+                tbody.appendChild(row);
             }});
 
             // Linha de total
             const totalRow = document.createElement('tr');
-            totalRow.style.fontWeight = 'bold';
-            totalRow.style.borderTop = '2px solid #ddd';
-            totalRow.style.backgroundColor = '#f8f9fa';
-            const totalCount = Math.round(entries.reduce((sum, [, count]) => sum + count, 0));
-            totalRow.innerHTML = `<td>Total</td><td>${{totalCount}}</td><td>100,0%</td>`;
-            table.appendChild(totalRow);
+            totalRow.className = 'ivv-total-row';
+            const totalCount = Math.round(entries.reduce((sum, [, c]) => sum + c, 0));
+            if (isMR) {{
+                totalRow.innerHTML = `<td>Total de respostas</td><td>${{Math.round(totalSelections)}}</td><td class="ivv-bar-cell"><div class="ivv-bar-val ivv-pct-col"></div></td><td class="ivv-base-col"></td>`;
+            }} else {{
+                totalRow.innerHTML = `<td>Total</td><td>${{totalCount}}</td><td class="ivv-bar-cell"><div class="ivv-bar-val ivv-pct-col">100,0%</div></td>`;
+            }}
+            tbody.appendChild(totalRow);
 
-            container.appendChild(chartContainer);
-            
-            // const summary = document.createElement('p');
-            // summary.textContent = validCount + ' respostas válidas';
-            // summary.style.marginTop = '15px';
-            // container.appendChild(summary);
+            table.appendChild(tbody);
+
+            // Dica de drilldown
+            const hint = document.createElement('p');
+            hint.className = 'ivv-drilldown-hint';
+            hint.textContent = 'Clique em uma linha para filtrar os demais gráficos por esta categoria.';
+
             container.appendChild(table);
+            container.appendChild(hint);
+
+            // ── SUB-BOX DE RESPOSTAS ABERTAS (_S absorvida) ──
+            if (varMeta.open_text_var) {{
+                const openKey = varMeta.name + '__open_text__';
+                const openTexts = records
+                    .map(r => r[openKey])
+                    .filter(t => t && String(t).trim());
+
+                if (openTexts.length > 0) {{
+                    // Extrair keywords simples (palavras com ≥4 chars, top 5)
+                    const wordFreq = {{}};
+                    openTexts.forEach(t => {{
+                        String(t).toLowerCase().split(/ +/).forEach(w => {{
+                            const wc = w.replace(/[^a-záéíóúâêîôûãõàèìòùç]/gi,'');
+                            if (wc.length >= 4) wordFreq[wc] = (wordFreq[wc]||0)+1;
+                        }});
+                    }});
+                    const topKw = Object.entries(wordFreq)
+                        .sort((a,b)=>b[1]-a[1]).slice(0,5)
+                        .filter(([,n])=>n>=2);
+
+                    const sub = document.createElement('div');
+                    sub.className = 'outros-sub';
+
+                    const subHeader = document.createElement('div');
+                    subHeader.className = 'outros-sub-header';
+                    subHeader.innerHTML = `<span class="outros-sub-label">Respostas abertas para "Outro"</span><span class="outros-sub-n">${{openTexts.length}} respostas</span>`;
+
+                    // Keyword chips
+                    let activeKw = null;
+                    const kwWrap = document.createElement('div');
+                    kwWrap.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-left:auto;';
+                    topKw.forEach(([word, n]) => {{
+                        const chip = document.createElement('span');
+                        chip.className = 'outros-kw';
+                        chip.textContent = word + ' (' + n + ')';
+                        chip.onclick = () => {{
+                            if (activeKw === word) {{
+                                activeKw = null;
+                                chip.classList.remove('active');
+                            }} else {{
+                                kwWrap.querySelectorAll('.outros-kw').forEach(c=>c.classList.remove('active'));
+                                activeKw = word;
+                                chip.classList.add('active');
+                            }}
+                            renderList();
+                        }};
+                        kwWrap.appendChild(chip);
+                    }});
+                    subHeader.appendChild(kwWrap);
+                    sub.appendChild(subHeader);
+
+                    const list = document.createElement('div');
+                    list.className = 'outros-list';
+
+                    function renderList() {{
+                        list.innerHTML = '';
+                        const filtered = activeKw
+                            ? openTexts.filter(t => t.toLowerCase().includes(activeKw))
+                            : openTexts;
+                        filtered.forEach((t, idx) => {{
+                            const item = document.createElement('div');
+                            item.className = 'outros-item';
+                            item.textContent = (idx+1) + '. ' + t;
+                            list.appendChild(item);
+                        }});
+                    }}
+                    renderList();
+
+                    sub.appendChild(list);
+                    container.appendChild(sub);
+                }}
+            }}
 
             return container;
         }}
@@ -3985,11 +4652,42 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 icon = '📊';
             }}
             
-            title.innerHTML = icon + ' ' + varMeta.title;
-            
+            const pPrefix = varMeta.p_num ? `P${{varMeta.p_num}}. ` : '';
+            title.innerHTML = icon + ' ' + pPrefix + varMeta.title;
+
             const subtitle = document.createElement('div');
             subtitle.className = 'section-subtitle';
-            subtitle.textContent = varMeta.spss_type || '';
+
+            // Pill do tipo de variável
+            if (varMeta.spss_type) {{
+                const typePill = document.createElement('span');
+                typePill.className = 'type-pill';
+                typePill.textContent = varMeta.spss_type;
+                subtitle.appendChild(typePill);
+            }}
+
+            // Skip logic: pill âmbar com tooltip (ao lado do type-pill)
+            if (varMeta.skip_logic) {{
+                const sl = varMeta.skip_logic;
+                // Usar P(n) do source se disponível, senão extrair código do título
+                const sourceMeta = VARS_META.find(v => v.name === sl.source_var);
+                const sourceShort = sourceMeta && sourceMeta.p_num
+                    ? `P${{sourceMeta.p_num}}`
+                    : (sl.source_title && sl.source_title.match(/^(Q\\d+[\\w]*)[.\\s\\-]/i)
+                        ? sl.source_title.match(/^(Q\\d+[\\w]*)[.\\s\\-]/i)[1]
+                        : (sl.source_var || sl.source_title));
+                const codeMap = CODE_TO_LABEL[sl.source_var] || {{}};
+                const pillsHTML = sl.categories
+                    .map(c => {{
+                        const label = codeMap[c] || codeMap[String(parseFloat(c))] || c;
+                        return `<span class="skip-pill">${{label}}</span>`;
+                    }})
+                    .join(' ');
+                const tag = document.createElement('span');
+                tag.className = 'skip-tag';
+                tag.innerHTML = `Filtrada por ${{sourceShort}}<span class="skip-tooltip">${{sl.coverage}}% dos respondentes vieram de <strong>${{sourceShort}}</strong>:<br>${{pillsHTML}}</span>`;
+                subtitle.appendChild(tag);
+            }}
             
             header.appendChild(title);
             header.appendChild(subtitle);
@@ -3998,18 +4696,23 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             content.className = 'section-content';
             
             // Escolha do renderizador
+            let rendered = null;
             if (varType === 'string') {{
-                content.appendChild(renderStringVariable(varMeta, records));
+                rendered = renderStringVariable(varMeta, records);
             }} else if (varType === 'multiple_response' || varMeta.type === 'mr') {{
-                content.appendChild(renderCategoricalVariable(varMeta, records));
+                rendered = renderCategoricalVariable(varMeta, records);
             }} else if (varType === 'date') {{
-                content.appendChild(renderDateVariable(varMeta, records));
+                rendered = renderDateVariable(varMeta, records);
             }} else if (varType === 'numeric' && measure === 'scale') {{
-                content.appendChild(renderNumericScaleVariable(varMeta, records));
+                rendered = renderNumericScaleVariable(varMeta, records);
             }} else {{
-                // numeric nominal/ordinal ou qualquer categórico
-                content.appendChild(renderCategoricalVariable(varMeta, records));
+                rendered = renderCategoricalVariable(varMeta, records);
             }}
+
+            // Sem dados: não exibir a seção
+            if (!rendered) return null;
+
+            content.appendChild(rendered);
             section.appendChild(header);
             section.appendChild(content);            
             return section;
@@ -4039,8 +4742,59 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             }}
 
             const wb = XLSX.utils.book_new();
-            const usedNames = new Set(); // Controle de nomes já usados
-            let sectionIndex = 1; // Contador para backup
+
+            // Registros filtrados atuais
+            const filteredRecs = getFilteredRecords(null);
+            const totalFilt = filteredRecs.length;
+
+            // ── ABA 1: RESUMO ──
+            const now = new Date();
+            const dateStr = now.toLocaleString('pt-BR');
+            const activeFilters = getActiveFiltersDescription();
+            const summaryRows = [
+                ['RESUMO DA EXPORTAÇÃO'],
+                [],
+                ['Arquivo', '{file_source}'],
+                ['Gerado em', dateStr],
+                ['Total de respondentes (base)', RECORDS.length],
+                ['Respondentes após filtros', totalFilt],
+                ['Variáveis analisadas', VARS_META.length],
+                ['Filtros aplicados', activeFilters.join(' | ')],
+            ];
+            const wsSum = XLSX.utils.aoa_to_sheet(summaryRows);
+            wsSum['!cols'] = [{{wch:28}}, {{wch:55}}];
+            wsSum['!merges'] = [{{s:{{r:0,c:0}}, e:{{r:0,c:1}}}}];
+            XLSX.utils.book_append_sheet(wb, wsSum, 'Resumo');
+
+            // ── ABA 2: DICIONÁRIO com N válido filtrado ──
+            function countValid(vm) {{
+                const vname = vm.name;
+                const vtype = vm.var_type || vm.type || 'single';
+                if (vtype === 'multiple_response' || vtype === 'mr') {{
+                    return filteredRecs.filter(r => r[vname] && r[vname].length > 0).length;
+                }}
+                return filteredRecs.filter(r => r[vname] !== null && r[vname] !== undefined).length;
+            }}
+
+            const dictRows = [['Nº','Variável SPSS','Pergunta','Tipo','N válidos (filtrado)','N missing','Filtrada por']];
+            VARS_META.forEach(vm => {{
+                const pNum = vm.p_num ? 'P' + vm.p_num : '';
+                const nv = countValid(vm);
+                const nm = totalFilt - nv;
+                const sl = vm.skip_logic;
+                let filtradaPor = '';
+                if (sl) {{
+                    const src = VARS_META.find(v => v.name === sl.source_var);
+                    filtradaPor = src && src.p_num ? 'P' + src.p_num : sl.source_var;
+                }}
+                dictRows.push([pNum, vm.sheet_code || vm.name, vm.title || '', vm.spss_type || '', nv, nm, filtradaPor]);
+            }});
+            const wsDic = XLSX.utils.aoa_to_sheet(dictRows);
+            wsDic['!cols'] = [{{wch:6}},{{wch:14}},{{wch:55}},{{wch:20}},{{wch:18}},{{wch:10}},{{wch:12}}];
+            XLSX.utils.book_append_sheet(wb, wsDic, 'Dicionário');
+
+            const usedNames = new Set(['Resumo','Dicionário']);
+            let sectionIndex = 1;
 
             sections.forEach(section => {{
                 const titleEl = section.querySelector('.section-title');
@@ -4092,18 +4846,18 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     }}
                     
                     // Limpar caracteres proibidos pelo Excel
-                    combinedTitle = combinedTitle.replace(/[:\\\\/\\?\\*\\[\\]]/g, "");
+                    combinedTitle = combinedTitle.replace(/[:\\/\\*\\[\\]\\?]/g, "");
                     
                     // Limitar a 31 caracteres (limite do Excel)
                     if (combinedTitle.length > 31) {{
                         // Tentar formato mais compacto: "P1-Título"
-                        const compactTitle = `${{varName}}-${{title.replace(/[:\\\\/\\?\\*\\[\\]\\s]/g, "")}}`;
+                        const compactTitle = `${{varName}}-${{title.replace(/[:\\/\\*\\[\\]\\?\\s]/g, "")}}`;
                         if (compactTitle.length <= 31) {{
                             sheetName = compactTitle;
                         }} else {{
                             // Cortar título mas manter variável
                             const maxTitleLength = 31 - varName.length - 1; // -1 para o hífen
-                            const truncatedTitle = title.replace(/[:\\\\/\\?\\*\\[\\]]/g, "").substring(0, maxTitleLength);
+                            const truncatedTitle = title.replace(/[:\\/\\*\\[\\]\\?]/g, "").substring(0, maxTitleLength);
                             sheetName = `${{varName}}-${{truncatedTitle}}`;
                         }}
                     }} else {{
@@ -4111,7 +4865,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     }}
                 }} else {{
                     // Fallback: usar índice numérico
-                    let safeName = title.replace(/[:\\\\/\\?\\*\\[\\]]/g, "");
+                    let safeName = title.replace(/[:\\/\\*\\[\\]\\?]/g, "");
                     safeName = safeName.replace(/\\s+/g, ' ').trim();
                     
                     // Adicionar número da seção
@@ -4173,7 +4927,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             XLSX.writeFile(wb, fileName);
             
             console.log(`📊 Excel exportado com ${{usedNames.size}} abas: ${{fileName}}`);
-            alert(`✅ Excel exportado com sucesso!\\n\\n📊 ${{usedNames.size}} abas criadas\\n📁 Arquivo: ${{fileName}}`);
+// Excel exportado — sem popup
         }}
 
         // ===== FUNÇÕES DE EXPORTAÇÃO PDF =====
@@ -4243,62 +4997,48 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             const header = document.createElement('div');
             header.style.cssText = `
                 background: white;
-                padding: 20px;
-                border-bottom: 3px solid #4A90E2;
-                margin-bottom: 20px;
+                padding: 0;
+                margin: 0;
                 font-family: Arial, sans-serif;
                 page-break-after: always;
+                height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             `;
             
             header.innerHTML = `
-                <div style="text-align: center; margin-bottom: 20px;">
-                    <h1 style="color: #4A90E2; font-size: 24px; margin: 0;">📋 DASHBOARD DE ANÁLISE - PESQUISA SPSS</h1>
-                    <div style="border: 2px solid #4A90E2; margin: 10px 0;"></div>
-                </div>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: 16px;">
-                    <div>
-                        <p style="margin: 5px 0;"><strong>📂 Arquivo:</strong> {file_source}</p>
-                        <p style="margin: 5px 0;"><strong>📅 Gerado em:</strong> ${{dateStr}}</p>
-                    </div>
-                    <div>
-                        <p style="margin: 5px 0;"><strong>👥 Respondentes:</strong> ${{formatNumberBR(totalRecords)}}</p>
-                        <p style="margin: 5px 0;"><strong>📊 Variáveis analisadas:</strong> ${{formatNumberBR(totalVars)}}</p>
+                <div style="text-align: center; width: 100%;">
+                    <h1 style="color: #4A90E2; font-size: 32px; margin-bottom: 30px;">📋 RELATÓRIO DE RESULTADOS</h1>
+                    
+                    <div style="font-size: 18px; line-height: 1.8; max-width: 600px; margin: 0 auto;">
+                        <p style="margin: 15px 0;"><strong>📂 Arquivo:</strong> {file_source}</p>
+                        <p style="margin: 15px 0;"><strong>📅 Gerado em:</strong> ${{dateStr}}</p>
+                        <p style="margin: 15px 0;"><strong>📅 Período de coleta:</strong> Calculado automaticamente</p>
+                        <p style="margin: 15px 0;"><strong>👥 Respondentes:</strong> ${{formatNumberBR(totalRecords)}}</p>
+                        <p style="margin: 15px 0;"><strong>📊 Variáveis analisadas:</strong> ${{formatNumberBR(totalVars)}}</p>
+                        <p style="margin: 15px 0;"><strong>🔍 Filtros aplicados:</strong> ${{activeFilters.join(', ') || 'Nenhum filtro aplicado'}}</p>
                     </div>
                 </div>
-                
-                <div style="margin-top: 15px;">
-                    <p style="margin: 5px 0; font-weight: bold;">🔍 Filtros aplicados:</p>
-                    ${{activeFilters.map(filter => `<p style="margin: 2px 0 2px 20px;">• ${{filter}}</p>`).join('')}}
-                </div>
-                
-                <div style="border: 2px solid #4A90E2; margin: 20px 0 10px 0;"></div>
             `;
             
             return header;
         }}
 
         async function exportToPDF() {{
+            const originalBtn = event.target.closest('.icon-btn');
             try {{
-                // Mostrar loading
-                const originalBtn = event.target;
-                originalBtn.textContent = '📄 Gerando...';
-                originalBtn.disabled = true;
+                originalBtn.classList.add('loading');
                 
                 console.log('=== EXPORTAÇÃO PDF INICIADA ===');
                 
-                // Verificar se há conteúdo
                 const contentEl = document.getElementById('content');
                 const sections = contentEl.querySelectorAll('.section');
                 
                 if (sections.length === 0) {{
-                    alert('⚠️ Nenhum conteúdo encontrado para exportar!');
-                    originalBtn.textContent = '📄 PDF';
-                    originalBtn.disabled = false;
+                    originalBtn.classList.remove('loading');
                     return;
                 }}
-                
-                console.log(`📊 Encontradas ${{sections.length}} seções para exportar`);
                 
                 // === ESTRATÉGIA SIMPLES E ROBUSTA ===
                 
@@ -4307,13 +5047,15 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 headerDiv.className = 'pdf-header-temp';
                 headerDiv.style.cssText = `
                     background: white;
-                    padding: 20px;
-                    border-bottom: 3px solid #4A90E2;
-                    margin-bottom: 20px;
+                    padding: 0;
+                    margin: 0;
                     font-family: Arial, sans-serif;
                     display: none;
                     print-color-adjust: exact;
                     -webkit-print-color-adjust: exact;
+                    height: calc(100vh - 30mm);
+                    align-items: center;
+                    justify-content: center;
                 `;
                 
                 // Informações do cabeçalho
@@ -4364,17 +5106,16 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 }}
                 
                 headerDiv.innerHTML = `
-                    <h1 style="color: #4A90E2; text-align: center; margin-bottom: 20px;">📋 DASHBOARD DE ANÁLISE - PESQUISA SPSS</h1>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: 14px;">
-                        <div>
-                            <div style="margin: 4px 0;"><strong>📂 Arquivo:</strong> {file_source}</div>
-                            <div style="margin: 4px 0;"><strong>📅 Gerado em:</strong> ${{dateStr}}</div>
-                            <div style="margin: 4px 0;"><strong>📅 Período de coleta:</strong> ${{periodoColeta}}</div>
-                        </div>
-                        <div>
-                            <div style="margin: 4px 0;"><strong>👥 Respondentes:</strong> ${{formatNumberBR(totalRecords)}}</div>
-                            <div style="margin: 4px 0;"><strong>📊 Variáveis analisadas:</strong> ${{formatNumberBR(totalVars)}}</div>
-                            <div style="margin: 4px 0;"><strong>🔍 Filtros aplicados:</strong> ${{activeFilters.join('; ') || 'Nenhum'}}</div>
+                    <div style="text-align: center; width: 100%;">
+                        <h1 style="color: #4A90E2; font-size: 28px; margin-bottom: 30px;">📋 RELATÓRIO DE RESULTADOS</h1>
+                        
+                        <div style="font-size: 16px; line-height: 1.8; max-width: 500px; margin: 0 auto;">
+                            <div style="margin: 12px 0;"><strong>📂 Arquivo:</strong> {file_source}</div>
+                            <div style="margin: 12px 0;"><strong>📅 Gerado em:</strong> ${{dateStr}}</div>
+                            <div style="margin: 12px 0;"><strong>📅 Período de coleta:</strong> ${{periodoColeta}}</div>
+                            <div style="margin: 12px 0;"><strong>👥 Respondentes:</strong> ${{formatNumberBR(totalRecords)}}</div>
+                            <div style="margin: 12px 0;"><strong>📊 Variáveis analisadas:</strong> ${{formatNumberBR(totalVars)}}</div>
+                            <div style="margin: 12px 0;"><strong>🔍 Filtros aplicados:</strong> ${{activeFilters.join('; ') || 'Nenhum filtro aplicado'}}</div>
                         </div>
                     </div>
                 `;
@@ -4386,7 +5127,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 }} else {{
                     contentElement.appendChild(headerDiv);
                 }}
-                
+
                 // Criar estilo de impressão
                 const printStyle = document.createElement('style');
                 printStyle.id = 'pdf-print-style';
@@ -4395,15 +5136,17 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                         body {{ margin: 0; padding: 15mm; background: white; font-family: Arial, sans-serif; }}
                         .filters-container {{ display: none !important; }}
                         
-                        /* CABEÇALHO - Garantir que apareça */
+                        /* CABEÇALHO - Garantir que apareça centralizado */
                         .pdf-header-temp {{ 
-                            display: block !important; 
+                            display: flex !important; 
                             visibility: visible !important;
                             position: static !important;
-                            margin-bottom: 30px !important;
-                            page-break-after: avoid !important;
-                            border-bottom: 3px solid #4A90E2 !important;
-                            padding-bottom: 20px !important;
+                            margin: 0 !important;
+                            padding: 0 !important;
+                            page-break-after: always !important;
+                            height: calc(100vh - 30mm) !important;
+                            align-items: center !important;
+                            justify-content: center !important;
                         }}
                         
                         .section {{ margin-bottom: 20px; page-break-inside: avoid; }}
@@ -4450,16 +5193,28 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 // Aguardar um momento
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
+                // Sugerir nome do arquivo PDF baseado no título
+                const originalTitle = document.title;
+                const dataAtual = new Date().toLocaleDateString('pt-BR').replace(new RegExp('/', 'g'), '-');
+                const nomeArquivoLimpo = '{file_source}'.replace('.sav', '').replace('.SAV', '');
+                const tituloPDF = `Relatorio de resultados_${{nomeArquivoLimpo}}_${{dataAtual}}`;
+                document.title = tituloPDF;
+                
                 console.log('🖨️ Abrindo diálogo de impressão...');
+                console.log('📄 Nome sugerido do arquivo:', tituloPDF);
                 window.print();
+                
+                // Restaurar título original após impressão
+                setTimeout(() => {{
+                    document.title = originalTitle;
+                }}, 2000);
                 
                 // Limpeza após 3 segundos
                 setTimeout(() => {{
-                    // Remover cabeçalho
-                    const header = document.querySelector('.pdf-header-temp');
-                    if (header && header.parentNode) {{
-                        header.parentNode.removeChild(header);
-                    }}
+                    // Remover cabeçalho e dicionário
+                    document.querySelectorAll('.pdf-header-temp').forEach(el => {{
+                        if (el.parentNode) el.parentNode.removeChild(el);
+                    }});
                     
                     // Remover estilos
                     const style = document.getElementById('pdf-print-style');
@@ -4470,26 +5225,13 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     console.log('🧹 Limpeza concluída');
                 }}, 3000);
                 
-                // Restaurar botão
-                originalBtn.textContent = '📄 PDF';
-                originalBtn.disabled = false;
-                
-                // Mostrar instruções
-                setTimeout(() => {{
-                    alert(`✅ Relatório em PDF gerado com sucesso!`);
-                }}, 800);
-                
+                originalBtn.classList.remove('loading');
                 console.log('✅ Processo de PDF concluído com sucesso');
                 
             }} catch (error) {{
                 console.error('❌ Erro na exportação PDF:', error);
-                
-                // Restaurar botão
-                const btn = event.target;
-                btn.textContent = '📄 PDF';
-                btn.disabled = false;
-                
-                // Fallback mais simples
+                const btn = event.target.closest('.icon-btn');
+                if (btn) btn.classList.remove('loading');
                 alert(`⚠️ Erro na exportação automática.\\n\\n` +
                       `💡 ALTERNATIVA MANUAL:\\n` +
                       `1. Pressione Ctrl+P (Cmd+P no Mac)\\n` +
@@ -4907,7 +5649,7 @@ def run_gui() -> int:
         root2 = tk.Tk()
         root2.withdraw()
         
-        default_out = os.path.splitext(in_path)[0] + "_dashboard_universal.html"
+        default_out = os.path.splitext(in_path)[0] + "_dashboard_8_1.html"
         out_path = filedialog.asksaveasfilename(
             title="Salvar dashboard HTML como...",
             defaultextension=".html", 
@@ -5000,7 +5742,7 @@ def run_cli() -> int:
         selected_vars = [v.strip() for v in args.vars.split(",") if v.strip()]
         filter_vars = [v.strip() for v in args.filters.split(",") if v.strip()] if args.filters else []
         
-        out_path = args.output or os.path.splitext(args.input)[0] + "_dashboard_universal.html"
+        out_path = args.output or os.path.splitext(args.input)[0] + "_dashboard_8_1.html"
         
         created_at, vars_meta, filters_meta, records, value_orders, code_to_label = build_records_and_meta(
             df, meta, selected_vars, filter_vars, os.path.basename(args.input), args.cliente, None
@@ -5013,7 +5755,7 @@ def run_cli() -> int:
         
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(html)
-        
+
         print(f"✅ Dashboard universal criado: {out_path}")
         return 0
         
