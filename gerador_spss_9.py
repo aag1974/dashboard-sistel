@@ -189,7 +189,7 @@ def _dic_paths_from_env_or_script() -> str:
     # prioridade: SPELLCHECK_DICT_DIR -> pasta do script -> ./dict
     if SPELLCHECK_DICT_DIR:
         return SPELLCHECK_DICT_DIR
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.abspath(__file__ if '__file__' in dir() else os.getcwd()))
     if os.path.isfile(os.path.join(script_dir, 'pt_BR.dic')):
         return script_dir
     if os.path.isfile(os.path.join('dict', 'pt_BR.dic')):
@@ -259,7 +259,7 @@ def _resolve_dict_dir() -> str:
       2) mesma pasta do script (se pt_BR.dic existir)
       3) ./dict ao lado do script
     """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = os.path.dirname(os.path.abspath(__file__ if '__file__' in globals() else os.getcwd()))
     if SPELLCHECK_DICT_DIR:
         return SPELLCHECK_DICT_DIR
     if os.path.isfile(os.path.join(base_dir, 'pt_BR.dic')):
@@ -2295,6 +2295,21 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
     
     # Metadados das variáveis e grupos de múltipla resposta (FASE 1)
     vars_meta, mr_groups = detect_variables_universal(selected_vars, meta, valabs, df)
+
+    # Detectar escalas (NPS, SAT, CSAT, CES) via tag no label da variável
+    labels_map = meta.column_names_to_labels or {}
+    for vm in vars_meta:
+        if (vm.get('var_type') or vm.get('type') or '') == 'multiple_response':
+            continue
+        col_label = str(labels_map.get(vm['name']) or '')
+        vmap_raw  = valabs.get(vm['name'], {})
+        si = detect_scale_info(col_label, vmap_raw)
+        if si:
+            vm['scale_info'] = si
+            vm['spss_type']  = f"{si['type']} · Escala {si['real_min']}-{si['real_max']}"
+            print(f"📊 Escala detectada: {vm['name']} → {si['type']} "
+                  f"{si['real_min']}-{si['real_max']}"
+                  f"{' (invertida)' if si['inverted'] else ''}")
     
     # ---------- PROCESSAMENTO DE FILTROS ----------
     filters_meta = []
@@ -2657,6 +2672,78 @@ def build_records_and_meta(df, meta, selected_vars: List[str], filter_vars: List
 
 # ========== DETECÇÃO DE SKIP LOGIC ==========
 
+def detect_scale_info(var_label: str, vmap: dict) -> Optional[dict]:
+    """
+    Detecta tipo e metadados de escala a partir do label da variável e mapa de valores.
+    Tags reconhecidas no label: (NPS), (SAT), (CSAT), (CES)
+    Retorna dict com scale_info ou None se não for escala reconhecida.
+    """
+    if not var_label or not vmap:
+        return None
+
+    tag_match = re.search(r'\((NPS|SAT|CSAT|CES)\)', var_label, re.IGNORECASE)
+    if not tag_match:
+        return None
+
+    scale_type = tag_match.group(1).upper()
+
+    keys = sorted([k for k in vmap.keys() if isinstance(k, (int, float))])
+    if len(keys) < 3:
+        return None
+
+    # Normalizar labels igual aos records (sem ":", sem espaços extras)
+    vals = [str(vmap[k]).replace(':', '').strip() for k in keys]
+
+    # Detectar NS no último label
+    ns_words = ['não sabe', 'nao sabe', 'não sei', 'ns/a', 'nsnr',
+                'não tenho', 'nao tenho', 'não lembro', 'nao lembro']
+    has_ns   = any(w in vals[-1].lower() for w in ns_words)
+    ns_label  = vals[-1] if has_ns else None
+    real_vals = vals[:-1] if has_ns else vals
+    real_keys = keys[:-1] if has_ns else keys
+
+    if len(real_vals) < 3:
+        return None
+
+    # Extrair valor mínimo real do primeiro label (ex: "0- Não recomenda" → 0)
+    num_match = re.match(r'^(\d+)', real_vals[0])
+    real_min  = int(num_match.group(1)) if num_match else int(real_keys[0])
+    real_max  = real_min + len(real_vals) - 1
+
+    # Direção: 0-10 é sempre ascendente; demais → detectar pelo primeiro âncora
+    first_lower = real_vals[0].lower()
+    neg = ['ruim', 'insatisf', 'discorda', 'difícil', 'dificil', 'nenhum',
+           'péssim', 'pessim', 'pior', 'inseguro', 'nao confia', 'não confia']
+    pos = ['bom', 'satisfeito', 'concorda', 'fácil', 'facil', 'certeza',
+           'excelente', 'recomendaria', 'definitiv', 'muito bem', 'sempre']
+
+    if real_min == 0:
+        inverted = False          # convenção universal: 0 = pior
+    elif any(w in first_lower for w in neg):
+        inverted = False
+    elif any(w in first_lower for w in pos):
+        inverted = True
+    else:
+        inverted = False          # fallback seguro
+
+    # label_to_value: label normalizado → valor numérico semântico
+    label_to_value = {}
+    for i, v in enumerate(real_vals):
+        raw_val = real_min + i
+        sem_val = (real_max - raw_val + real_min) if inverted else raw_val
+        label_to_value[v] = sem_val
+
+    return {
+        'type':           scale_type,
+        'real_min':       real_min,
+        'real_max':       real_max,
+        'inverted':       inverted,
+        'has_ns':         has_ns,
+        'ns_label':       ns_label,
+        'label_to_value': label_to_value,
+    }
+
+
 def _detect_skip_logic(vars_meta: List[dict], records: List[dict]) -> None:
     """
     Detecta skip logic por taxa de resposta por categoria de Qx.
@@ -3011,27 +3098,27 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         .filters-bar {{
             display: flex;
             align-items: stretch;
-            height: 52px;
+            height: 64px;
             padding: 0 20px;
         }}
 
         .filter-bar-label {{
             display: flex;
             align-items: center;
-            padding-right: 16px;
+            padding-right: 18px;
             border-right: 0.5px solid var(--border);
-            margin-right: 16px;
+            margin-right: 18px;
             flex-shrink: 0;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 600;
-            color: var(--primary-dark);
+            color: #6c757d;
             letter-spacing: 0.01em;
         }}
 
         .filters-inline {{
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
             flex: 1;
             overflow: visible;
         }}
@@ -3040,14 +3127,14 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             display: flex;
             flex-direction: column;
             justify-content: center;
-            gap: 2px;
+            gap: 4px;
             flex: 1;
             min-width: 80px;
         }}
 
         .filter-col-label {{
-            font-size: 11px;
-            color: var(--primary-dark);
+            font-size: 12px;
+            color: #6c757d;
             font-weight: 500;
             white-space: nowrap;
             overflow: hidden;
@@ -3055,19 +3142,19 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         }}
 
         .filter-col-select {{
-            font-size: 12px;
-            padding: 3px 22px 3px 7px;
+            font-size: 13px;
+            padding: 4px 26px 4px 9px;
             border: 0.5px solid #ddd;
             border-radius: 5px;
             background: #f8f9fa;
             color: var(--text);
             cursor: pointer;
-            height: 26px;
+            height: 30px;
             appearance: none;
             -webkit-appearance: none;
             background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
-            background-position: right 6px center;
+            background-position: right 8px center;
             transition: border-color 0.15s;
             width: 100%;
         }}
@@ -3242,6 +3329,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             display: flex;
             flex-direction: column;
             gap: 20px;
+            padding-top: 20px;
         }}
 
         .section {{
@@ -3276,11 +3364,14 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         .section-title {{
             font-size: 15px;
             font-weight: 500;
-            color: var(--text);
             margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
+            display: block;
+        }}
+
+        .section-title .p-num {{
+            font-weight: 600;
+            white-space: nowrap;
+            margin-right: 4px;
         }}
 
         .section-subtitle {{
@@ -3373,6 +3464,93 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             background: rgba(111,171,138,0.08);
             border-bottom: 1px solid rgba(111,171,138,0.2);
         }}
+
+        .section-header.nps-header {{
+            background: rgba(184,59,92,0.05);
+            border-bottom-color: rgba(184,59,92,0.15);
+        }}
+
+        .type-pill.nps {{
+            background: rgba(184,59,92,0.08);
+            border-color: rgba(184,59,92,0.35);
+            color: var(--red);
+        }}
+
+        .type-pill.scale {{
+            background: rgba(123,175,192,0.12);
+            border-color: rgba(123,175,192,0.4);
+            color: var(--primary-dark);
+        }}
+
+
+        .type-pill.open {{
+            background: #f1f3f5;
+            border-color: #ddd;
+            color: #6c757d;
+        }}
+
+        .section-header.open-header {{
+            background: var(--teal-light);
+            border-bottom-color: rgba(123,175,192,0.2);
+        }}
+        /* ===== SCALE METRIC ROWS (NPS / SAT / CSAT / CES) ===== */
+        .scale-metrics {{
+            border-top: 1.5px solid var(--border);
+        }}
+        .scale-metric-row {{
+            display: flex;
+            align-items: center;
+            border-bottom: 0.5px solid var(--border);
+        }}
+        .scale-metric-row:last-child {{ border-bottom: none; }}
+        .scale-metric-label {{
+            padding: 7px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--primary-dark);
+            width: 45%;
+            border-right: 0.5px solid var(--border);
+        }}
+        .scale-metric-value {{
+            padding: 7px 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--primary-dark);
+            flex: 1;
+        }}
+        .scale-metric-row.highlight {{ background: var(--teal-light); }}
+        .scale-metric-row.nps-score {{
+            border-top: 1px solid var(--border);
+        }}
+        .scale-metric-row.nps-score .scale-metric-label {{
+            font-size: 12px;
+        }}
+        .scale-metric-row.nps-score .scale-metric-value {{
+            font-size: 16px;
+        }}
+        /* Score negativo → vinho */
+        .scale-metric-row.nps-score-neg {{ background: rgba(184,59,92,0.05); border-top-color: rgba(184,59,92,0.2); }}
+        .scale-metric-row.nps-score-neg .scale-metric-label,
+        .scale-metric-row.nps-score-neg .scale-metric-value {{ color: var(--red); }}
+        /* Score zero → cinza */
+        .scale-metric-row.nps-score-zero {{ background: #f8f9fa; }}
+        .scale-metric-row.nps-score-zero .scale-metric-label,
+        .scale-metric-row.nps-score-zero .scale-metric-value {{ color: #888; }}
+        /* Score positivo → verde */
+        .scale-metric-row.nps-score-pos {{ background: rgba(111,171,138,0.05); border-top-color: rgba(111,171,138,0.25); }}
+        .scale-metric-row.nps-score-pos .scale-metric-label,
+        .scale-metric-row.nps-score-pos .scale-metric-value {{ color: var(--green-dark); }}
+        .scale-metric-row.nps-det .scale-metric-label,
+        .scale-metric-row.nps-det .scale-metric-value {{ color: var(--red); }}
+        .scale-metric-row.nps-neu .scale-metric-label,
+        .scale-metric-row.nps-neu .scale-metric-value {{ color: #888; }}
+        .scale-metric-row.nps-pro .scale-metric-label,
+        .scale-metric-row.nps-pro .scale-metric-value {{ color: var(--green-dark); }}
+        /* Cores das barras e percentuais por tipo de variável */
+        .ivv-bar-bg {{ background: var(--bar-color, var(--primary)); }}
+        .ivv-pct-col {{ color: var(--bar-text, var(--primary-dark)); }}
+
+
         }}
 
         .chart-container {{
@@ -3414,6 +3592,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             border-collapse: collapse;
             font-size: 13px;
             table-layout: fixed;
+            margin: 0;
         }}
 
         .ivv-table th {{
@@ -3469,8 +3648,8 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             bottom: 4px;
             left: 0;
             border-radius: 3px;
-            background: var(--primary);
-            opacity: 0.15;
+            background: var(--bar-color, var(--primary));
+            opacity: 0.18;
             transition: width 0.5s ease, opacity 0.2s ease;
             max-width: calc(100% - 16px);
         }}
@@ -3479,7 +3658,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             position: relative;
             font-size: 13px;
             font-weight: 600;
-            color: var(--primary-dark);
+            color: var(--bar-text, var(--primary-dark));
             padding-left: 6px;
         }}
 
@@ -3487,7 +3666,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             text-align: left;
             font-weight: 600;
             font-size: 13px;
-            color: var(--primary-dark);
+            color: var(--bar-text, var(--primary-dark));
             white-space: nowrap;
         }}
 
@@ -3503,10 +3682,39 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         }}
 
         .section-content {{
-            padding: 16px 20px;
+            padding: 16px 20px 16px;
         }}
 
+        /* Toggle NS */
+        .ivv-ns-row td {{ color: #bbb; font-style: italic; }}
+        .ivv-ns-row .pct, .ivv-ns-row .ivv-bar-val {{ color: #ccc !important; }}
+        .ivv-ns-row .ivv-bar-bg {{ opacity: .07; }}
+
         .ivv-drilldown-hint {{
+            font-size: 11px;
+            color: #bbb;
+            padding: 8px 16px 10px;
+            font-style: italic;
+        }}
+
+        .ns-toggle-wrap {{
+            display: inline-flex; align-items: center; gap: 6px;
+            cursor: pointer; user-select: none; margin-left: 4px;
+        }}
+        .ns-track {{
+            width: 28px; height: 16px; border-radius: 8px;
+            position: relative; transition: background .2s; flex-shrink: 0;
+        }}
+        .ns-on     {{ background: var(--primary); }}
+        .ns-on-nps {{ background: var(--red); }}
+        .ns-off    {{ background: #ccc; }}
+        .ns-thumb {{
+            width: 12px; height: 12px; border-radius: 50%;
+            background: white; position: absolute; top: 2px; transition: left .2s;
+        }}
+        .ns-on  .ns-thumb, .ns-on-nps .ns-thumb {{ left: 14px; }}
+        .ns-off .ns-thumb {{ left: 2px; }}
+        .ns-toggle-label {{ font-size: 11px; color: #6c757d; }}
             font-size: 11px;
             color: #6c757d;
             margin-top: 8px;
@@ -3622,8 +3830,8 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 </head>
 <body>
     <div class="filters-container">
-        <div class="filters-bar">
-            <span class="filter-bar-label">Filtrar</span>
+        <div class="filters-bar" id="filtersBar">
+            <span class="filter-bar-label" id="filtrarLabel">Filtrar</span>
             <div class="filters-inline" id="filtersGrid">
                 <!-- Filtros gerados dinamicamente -->
             </div>
@@ -3707,7 +3915,16 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             if (!container) return;
             container.innerHTML = '';
 
-            if (FILTERS.length === 0) return;
+            if (FILTERS.length === 0) {{
+                // Opção C: header reduzido só com exportações
+                const bar = document.getElementById('filtersBar');
+                const lbl = document.getElementById('filtrarLabel');
+                if (bar)  bar.style.height  = '48px';
+                if (lbl)  lbl.style.display = 'none';
+                const inline = document.getElementById('filtersGrid');
+                if (inline) inline.style.display = 'none';
+                return;
+            }}
 
             FILTERS.forEach(f => {{
                 const filterGroup = document.createElement('div');
@@ -3764,13 +3981,14 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 // Records filtrados excluindo este filtro
                 const crossRecords = getFilteredRecords(f.name);
 
-                // Contar por categoria
+                // Contar por categoria (ponderado)
                 const counts = {{}};
                 crossRecords.forEach(r => {{
                     const v = r[f.name];
                     if (v !== null && v !== undefined && String(v).trim() !== '') {{
                         const k = String(v).trim();
-                        counts[k] = (counts[k] || 0) + 1;
+                        const w = r.__weight__ || 1;
+                        counts[k] = (counts[k] || 0) + w;
                     }}
                 }});
 
@@ -3780,7 +3998,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     const span = opt.querySelector('.filter-count');
                     if (span) {{
                         const n = counts[val] || 0;
-                        span.textContent = n > 0 ? '(' + n + ')' : '(0)';
+                        span.textContent = n > 0 ? '(' + Math.round(n) + ')' : '(0)';
                     }}
                 }});
             }});
@@ -3868,24 +4086,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
             if (s.size === 0) DRILLDOWN.delete(varName);
 
-            // Capturar posição visual do card antes do re-render
-            const anchorId = 'section-' + varName;
-            const anchorBefore = document.getElementById(anchorId);
-            const topBefore = anchorBefore ? anchorBefore.getBoundingClientRect().top : null;
-
             renderAll();
-
-            // Após render: ajustar scroll para manter o card na mesma posição visual
-            requestAnimationFrame(() => {{
-                const anchorAfter = document.getElementById(anchorId);
-                if (anchorAfter && topBefore !== null) {{
-                    const topAfter = anchorAfter.getBoundingClientRect().top;
-                    const delta = topAfter - topBefore;
-                    if (Math.abs(delta) > 1) {{
-                        window.scrollBy({{ top: delta, behavior: 'instant' }});
-                    }}
-                }}
-            }});
         }}
 
         function clearAllDrilldowns() {{
@@ -3949,6 +4150,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
         // RENDERIZAÇÃO
         function renderAll() {{
+            const _scrollY = window.scrollY;
             const filteredRecordsAll = getFilteredRecords(null);
             const content = document.getElementById('content');
             content.innerHTML = '';
@@ -3963,32 +4165,35 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     // Inserir número P como span logo após o ponto colorido
                     const titleEl = section.querySelector('.section-title');
                     if (titleEl) {{
-                        const pSpan = document.createElement('span');
                         const titleColor = titleEl.style.color || 'var(--primary-dark)';
-                        pSpan.style.cssText = 'font-weight:600;color:' + titleColor + ';white-space:nowrap;';
-                        pSpan.textContent = 'P' + pCounter + '.';
-                        const dot = titleEl.querySelector('.type-dot');
-                        if (dot) {{
-                            dot.after(pSpan);
-                        }} else {{
-                            titleEl.prepend(pSpan);
-                        }}
+                        const pSpan = document.createElement('span');
+                        pSpan.className = 'p-num';
+                        pSpan.style.color = titleColor;
+                        pSpan.textContent = 'P' + pCounter + '. ';
+                        titleEl.prepend(pSpan);
                     }}
                     content.appendChild(section);
                 }}
             }});
+            // Restaurar posição de scroll com duplo rAF (garante DOM reconstruído)
+            requestAnimationFrame(() => requestAnimationFrame(() =>
+                window.scrollTo({{ top: _scrollY, behavior: 'instant' }})
+            ));
         }}
 
 
         function renderStringVariable(varMeta, records) {{
             const container = document.createElement('div');
+            container.style.cssText = 'padding-top:16px;--bar-color:#aaa;';
 
-            // Normaliza texto: tira espaços, ignora '99' e aplica capitalização simples
+            // Normaliza texto: tira espaços, ignora códigos de não-resposta e aplica capitalização simples
+            const SKIP_CODES = new Set(['0','00','000','9','90','99','099','999','9999',
+                                        'ns','nr','na','n/a','.','-','x','xx','xxx']);
             function normalizeText(text) {{
                 if (text === null || text === undefined) return '';
-                let t = String(text).trim();
-                if (!t || t === '99') return '';
-                return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+                let t = String(text).trim().replace(/[.,;!?-]+$/, '').trim(); // remove pontuação final
+                if (!t || SKIP_CODES.has(t.toLowerCase())) return '';
+                return t.charAt(0).toUpperCase() + t.slice(1);
             }}
 
             // Coleta e normaliza as respostas
@@ -4014,10 +4219,9 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
             const responseList = document.createElement('div');
             responseList.style.cssText =
-                'max-height: 400px; overflow-y: auto; ' +
+                'max-height: 400px; overflow-y: auto; overflow-x: hidden; ' +
                 'border: 0.5px solid var(--border); ' +
-                'border-radius: var(--radius); ' +
-                'overflow: hidden;';
+                'border-radius: var(--radius);';
 
             validResponses.forEach((response, index) => {{
                 const responseItem = document.createElement('div');
@@ -4179,6 +4383,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
         function renderNumericScaleVariable(varMeta, records) {{
             const container = document.createElement('div');
+            container.style.cssText = 'padding-top:16px;--bar-color:#aaa;';
 
             // Coletar valores com seus pesos para histograma ponderado
             const weightedValues = [];
@@ -4195,24 +4400,59 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             }}
 
             const stats = varMeta.stats || {{}};
-            const summary = document.createElement('p');
-            let statsText = '<strong>Estatísticas</strong>: ';
 
-            if (stats && typeof stats === 'object') {{
-                const parts = [];
-                if (stats.n !== undefined)      parts.push(`N = ${{Math.round(stats.n)}}`);
-                if (stats.mean !== undefined)   parts.push(`Média = ${{formatBR(stats.mean)}}`);
-                if (stats.median !== undefined) parts.push(`Mediana = ${{formatBR(stats.median)}}`);
-                if (stats.stddev !== undefined) parts.push(`DP = ${{formatBR(stats.stddev)}}`);
-                if (stats.min !== undefined)    parts.push(`Mín = ${{formatBR(stats.min)}}`);
-                if (stats.max !== undefined)    parts.push(`Máx = ${{formatBR(stats.max)}}`);
-                statsText += parts.join(' | ');
-            }} else {{
-                statsText += 'não disponível';
+            // Calcular estatísticas dos records FILTRADOS (não usar varMeta.stats que é estático)
+            const n      = weightedValues.length;
+            const totalW = weightedValues.reduce((s, wv) => s + wv.weight, 0);
+            const mean   = totalW > 0
+                ? weightedValues.reduce((s, wv) => s + wv.value * wv.weight, 0) / totalW
+                : 0;
+
+            // Desvio padrão ponderado
+            const variance = totalW > 1
+                ? weightedValues.reduce((s, wv) => s + wv.weight * Math.pow(wv.value - mean, 2), 0) / (totalW - 1)
+                : 0;
+            const stddev = Math.sqrt(variance);
+
+            // Mediana ponderada (ordenar e acumular peso até 50%)
+            const sorted = [...weightedValues].sort((a, b) => a.value - b.value);
+            let cumW = 0, median = sorted[0].value;
+            for (const wv of sorted) {{
+                cumW += wv.weight;
+                if (cumW >= totalW / 2) {{ median = wv.value; break; }}
+            }}
+            const minValStat = sorted[0].value;
+            const maxValStat = sorted[sorted.length - 1].value;
+
+            // Cards de métricas inline
+            const statsBar = document.createElement('div');
+            statsBar.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;';
+
+            function addStatCard(label, value, decimals=2) {{
+                if (value === undefined || value === null) return;
+                const card = document.createElement('div');
+                card.style.cssText =
+                    'background:#f8f9fa;border:0.5px solid var(--border);border-radius:6px;' +
+                    'padding:6px 12px;display:flex;flex-direction:column;align-items:center;min-width:70px;';
+                const lbl = document.createElement('span');
+                lbl.style.cssText = 'font-size:10px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;';
+                lbl.textContent = label;
+                const val = document.createElement('span');
+                val.style.cssText = 'font-size:14px;font-weight:600;color:var(--primary-dark);';
+                val.textContent = typeof value === 'number'
+                    ? value.toLocaleString('pt-BR', {{minimumFractionDigits:0, maximumFractionDigits:decimals}})
+                    : value;
+                card.appendChild(lbl);
+                card.appendChild(val);
+                statsBar.appendChild(card);
             }}
 
-            summary.innerHTML = statsText;
-            summary.style.marginBottom = '15px';
+            addStatCard('N',       n,          0);
+            addStatCard('Média',   mean,       2);
+            addStatCard('Mediana', median,     2);
+            addStatCard('DP',      stddev,     2);
+            addStatCard('Mín',     minValStat, 2);
+            addStatCard('Máx',     maxValStat, 2);
 
             const chartContainer = document.createElement('div');
             chartContainer.className = 'chart-container';
@@ -4301,7 +4541,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 }}
             }});
 
-            container.appendChild(summary);
+            container.appendChild(statsBar);
             container.appendChild(chartContainer);
 
             return container;
@@ -4309,6 +4549,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
         function renderDateVariable(varMeta, records) {{
             const container = document.createElement('div');
+            container.style.cssText = 'padding-top:16px;--bar-color:#aaa;';
 
             const freq = {{}};
             let validCount = 0;
@@ -4441,7 +4682,26 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 }}
             }});
 
-            const entries = Object.entries(freq).filter(([key]) => key !== '-1' && key !== '-1.0');
+            // Filtrar -1 (missing) e, para escalas ou quando NS excluído, o label NS
+            const nsLabelScale = varMeta.scale_info && varMeta.scale_info.ns_label;
+            // NS words para detecção automática em qualquer categórica
+            const nsWords = ['não sabe', 'nao sabe', 'não sei', 'nao sei', 'ns/a', 'ns/nr', 'não tenho'];
+            const detectNsLabel = (label) => nsWords.some(w => String(label).toLowerCase().includes(w));
+            // Excluir NS se: (a) var de escala com ns_label, ou (b) toggle NS desativado
+            const nsIncluded = varMeta._nsIncluded !== false; // padrão true
+            const entries = Object.entries(freq).filter(([key]) => {{
+                if (key === '-1' || key === '-1.0') return false;
+                // NS de escala: excluir só quando toggle OFF; senão mostrar em cinza
+                if (!nsIncluded && nsLabelScale && key === nsLabelScale) return false;
+                if (!nsIncluded && !nsLabelScale && detectNsLabel(key)) return false;
+                return true;
+            }});
+
+            // NS do denominador: só excluir quando toggle OFF
+            if (!nsIncluded) {{
+                if (nsLabelScale && freq[nsLabelScale]) validCount -= freq[nsLabelScale];
+                else Object.keys(freq).forEach(key => {{ if (detectNsLabel(key)) validCount -= freq[key]; }});
+            }}
             if (entries.length === 0) {{
                 return null;
             }}
@@ -4520,12 +4780,16 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 const barWidth = (pct / maxPct * 100).toFixed(1);
 
                 let displayLabel = rawLabel;
-                if (CODE_TO_LABEL[varMeta.name] && CODE_TO_LABEL[varMeta.name][rawLabel]) {{
+                // Ordinal vars já armazenam labels — CODE_TO_LABEL causaria duplicatas
+                if (varMeta.measure !== 'ordinal' && CODE_TO_LABEL[varMeta.name] && CODE_TO_LABEL[varMeta.name][rawLabel]) {{
                     displayLabel = CODE_TO_LABEL[varMeta.name][rawLabel];
                 }}
 
                 const row = document.createElement('tr');
-                row.className = 'ivv-row' + (isActive ? ' drilldown-active' : '');
+                const isNsRow = !!varMeta.scale_info && detectNsLabel(rawLabel);
+                row.className = 'ivv-row ivv-data-row' + (isActive ? ' drilldown-active' : '') + (isNsRow ? ' ivv-ns-row' : '');
+                row.dataset.label = rawLabel;
+                row.dataset.label = rawLabel;
                 row.title = 'Clique para filtrar por esta categoria';
 
                 // Célula de frequência com barra embutida
@@ -4562,14 +4826,115 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
             table.appendChild(tbody);
 
-            // Dica de drilldown
+            const tableWrap = document.createElement('div');
+            tableWrap.style.cssText = 'border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden;';
+            tableWrap.appendChild(table);
+
+            // ===== SCALE METRICS (NPS / SAT / CSAT / CES) =====
+            if (varMeta.scale_info && !isMR) {{
+                const si  = varMeta.scale_info;
+                const ltv = si.label_to_value || {{}};
+
+                // Acumular frequências por valor semântico real
+                const valueFreq = {{}};
+                let scaleTotal  = 0;
+                Object.entries(freq).forEach(([label, count]) => {{
+                    if (si.ns_label && label === si.ns_label && !nsIncluded) return;
+                    const rv = ltv[label];
+                    if (rv === undefined) return;
+                    valueFreq[rv] = (valueFreq[rv] || 0) + count;
+                    scaleTotal   += count;
+                }});
+
+                if (scaleTotal > 0) {{
+                    // Colorir linhas da tabela para NPS
+                    if (si.type === 'NPS') {{
+                        tbody.querySelectorAll('tr[data-label]').forEach(tr => {{
+                            const rv = ltv[tr.dataset.label];
+                            if (rv === undefined) return;
+                            if (rv <= 6) {{
+                                tr.style.setProperty('--bar-color', 'var(--red)');
+                                tr.style.setProperty('--bar-text',  'var(--red)');
+                            }} else if (rv <= 8) {{
+                                tr.style.setProperty('--bar-color', '#bbb');
+                                tr.style.setProperty('--bar-text',  '#888');
+                            }} else {{
+                                tr.style.setProperty('--bar-color', 'var(--green)');
+                                tr.style.setProperty('--bar-text',  'var(--green-dark)');
+                            }}
+                        }});
+                    }}
+
+                    const metricsDiv = document.createElement('div');
+                    metricsDiv.className = 'scale-metrics';
+
+                    function addMetricRow(labelText, valueText, cssClass) {{
+                        const mrow  = document.createElement('div');
+                        mrow.className = 'scale-metric-row' + (cssClass ? ' ' + cssClass : '');
+                        const mlbl  = document.createElement('div');
+                        mlbl.className = 'scale-metric-label';
+                        mlbl.textContent = labelText;
+                        const mval  = document.createElement('div');
+                        mval.className = 'scale-metric-value';
+                        mval.textContent = valueText;
+                        mrow.appendChild(mlbl);
+                        mrow.appendChild(mval);
+                        metricsDiv.appendChild(mrow);
+                    }}
+
+                    function fmtPct(n) {{
+                        return n.toLocaleString('pt-BR', {{minimumFractionDigits:1, maximumFractionDigits:1}}) + '%';
+                    }}
+                    function fmtMean(n) {{
+                        return n.toLocaleString('pt-BR', {{minimumFractionDigits:1, maximumFractionDigits:1}});
+                    }}
+
+                    if (si.type === 'NPS') {{
+                        const det = [0,1,2,3,4,5,6].reduce((s,v) => s + (valueFreq[v]||0), 0);
+                        const neu = [7,8].reduce((s,v) => s + (valueFreq[v]||0), 0);
+                        const pro = [9,10].reduce((s,v) => s + (valueFreq[v]||0), 0);
+                        const detPct = det / validCount * 100;
+                        const neuPct = neu / validCount * 100;
+                        const proPct = pro / validCount * 100;
+                        const score  = Math.round(proPct - detPct);
+                        addMetricRow('Detratores (0 a 6): ' + Math.round(det), fmtPct(detPct), 'nps-det');
+                        addMetricRow('Neutros (7 e 8): '     + Math.round(neu), fmtPct(neuPct), 'nps-neu');
+                        addMetricRow('Promotores (9 e 10): ' + Math.round(pro), fmtPct(proPct), 'nps-pro');
+
+                        // Score NPS: verde se positivo, cinza se zero, vinho se negativo
+                        const scoreClass = score > 0 ? 'nps-score nps-score-pos'
+                                         : score < 0 ? 'nps-score nps-score-neg'
+                                         : 'nps-score nps-score-zero';
+                        addMetricRow('NPS = % Promotores − % Detratores', (score >= 0 ? '+' : '') + score, scoreClass);
+
+                    }} else if (si.type === 'SAT') {{
+                        const t3bCount = [8,9,10].reduce((s,v) => s + (valueFreq[v]||0), 0);
+                        const t3bPct   = t3bCount / validCount * 100;
+                        const mean     = Object.entries(valueFreq).reduce((s,[v,c]) => s + Number(v)*c, 0) / scaleTotal;
+                        addMetricRow('T3B — Notas 8, 9 e 10', fmtPct(t3bPct), 'highlight');
+                        addMetricRow('Média', fmtMean(mean), '');
+
+                    }} else {{
+                        // CSAT / CES: Top 2 Box = 2 maiores valores semânticos
+                        const allVals = Array.from(new Set(Object.keys(valueFreq).map(Number))).sort((a,b)=>a-b);
+                        const top2    = allVals.slice(-2);
+                        const top2n   = top2.reduce((s,v) => s + (valueFreq[v]||0), 0);
+                        const top2pct = top2n / validCount * 100;
+                        const mean    = Object.entries(valueFreq).reduce((s,[v,c]) => s + Number(v)*c, 0) / scaleTotal;
+                        const t2lbl   = si.type === 'CES'
+                            ? 'Top 2 Box — Fácil / Muito fácil'
+                            : 'Top 2 Box — Satisfeito / Muito satisfeito';
+                        addMetricRow(t2lbl, fmtPct(top2pct), 'highlight');
+                        addMetricRow('Média', fmtMean(mean), '');
+                    }}
+
+                    tableWrap.appendChild(metricsDiv);
+                }}
+            }}
             const hint = document.createElement('p');
             hint.className = 'ivv-drilldown-hint';
             hint.textContent = 'Clique em uma linha para filtrar os demais gráficos por esta categoria.';
 
-            const tableWrap = document.createElement('div');
-            tableWrap.style.cssText = 'border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden;';
-            tableWrap.appendChild(table);
             container.appendChild(tableWrap);
             container.appendChild(hint);
 
@@ -4662,7 +5027,14 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             }}
             
             const header = document.createElement('div');
-            header.className = 'section-header' + (varMeta.type === 'mr' || varMeta.var_type === 'multiple_response' ? ' mr-header' : '');
+            const isNPSVar = varMeta.scale_info && varMeta.scale_info.type === 'NPS';
+            const isMRSection = varMeta.type === 'mr' || varMeta.var_type === 'multiple_response';
+            const isOpenSection = (varMeta.var_type || varMeta.type || '') === 'string';
+            if (isNPSVar)         {{ section.style.setProperty('--bar-color','var(--red)'); }} // bar-text por linha
+            else if (isMRSection) {{ section.style.setProperty('--bar-color','var(--green)'); section.style.setProperty('--bar-text','var(--green-dark)'); }}
+            else if (isOpenSection){{ section.style.setProperty('--bar-color','#aaa'); section.style.setProperty('--bar-text','#6c757d'); }}
+            const isOpenHeader = (varMeta.var_type || varMeta.type || '') === 'string' || (varMeta.var_type || varMeta.type || '') === 'date';
+            header.className = 'section-header' + (varMeta.type === 'mr' || varMeta.var_type === 'multiple_response' ? ' mr-header' : '') + (isNPSVar ? ' nps-header' : '') + (isOpenHeader ? ' open-header' : '');
             
             const title = document.createElement('h2');
             title.className = 'section-title';
@@ -4673,24 +5045,28 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             let icon = '';
             const isMRVar = varType === 'multiple_response' || varMeta.type === 'mr';
             if (varType === 'string') {{
-                icon = '<span class="type-dot dot-open"></span>';
+                icon = '';
             }} else if (isMRVar) {{
-                icon = '<span class="type-dot dot-mr"></span>';
+                icon = '';
             }} else if (varType === 'date') {{
-                icon = '<span class="type-dot dot-date"></span>';
+                icon = '';
             }} else if (varType === 'numeric' && measure === 'scale') {{
-                icon = '<span class="type-dot dot-scale"></span>';
+                icon = '';
             }} else {{
-                icon = '<span class="type-dot dot-cat"></span>';
+                icon = '';
             }}
             
             const pPrefix = '';  // p_num atribuído dinamicamente em renderAll
             // Cor do título segue o tipo: MR=verde, string/date=cinza, resto=teal
             const isMRType2 = varType === 'multiple_response' || varMeta.type === 'mr';
             const isOpenType = varType === 'string' || varType === 'date';
-            const titleColor = isMRType2 ? 'var(--green-dark)' : (isOpenType ? '#6c757d' : 'var(--primary-dark)');
+            const isNPSType  = varMeta.scale_info && varMeta.scale_info.type === 'NPS';
+            const titleColor = isNPSType  ? 'var(--red)'
+                             : isMRType2  ? 'var(--green-dark)'
+                             : isOpenType ? '#888'
+                             : 'var(--primary-dark)';
             title.style.color = titleColor;
-            title.innerHTML = icon + ' ' + varMeta.title;
+            title.innerHTML = (icon ? icon + ' ' : '') + varMeta.title;
 
             const subtitle = document.createElement('div');
             subtitle.className = 'section-subtitle';
@@ -4699,9 +5075,39 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             if (varMeta.spss_type) {{
                 const typePill = document.createElement('span');
                 const isMRType = varType === 'multiple_response' || varMeta.type === 'mr';
-                typePill.className = 'type-pill' + (isMRType ? ' mr' : '');
+                const isNPSpill = varMeta.scale_info && varMeta.scale_info.type === 'NPS';
+                const isScalePill = !!varMeta.scale_info;
+                const isOpenPill = (varType === 'string' || varType === 'date') && !isMRType;
+                typePill.className = 'type-pill' + (isMRType ? ' mr' : '') + (isNPSpill ? ' nps' : (isScalePill ? ' scale' : (isOpenPill ? ' open' : '')));
                 typePill.textContent = varMeta.spss_type;
                 subtitle.appendChild(typePill);
+            }}
+
+            // Toggle NS: para variáveis categóricas que possam ter "Não sabe"
+            // Toggle NS apenas para escalas com tag (CSAT/SAT/NPS/CES)
+            const isCateg = !!varMeta.scale_info;
+            if (isCateg) {{
+                const nsToggleWrap = document.createElement('div');
+                nsToggleWrap.className = 'ns-toggle-wrap';
+                nsToggleWrap.title = 'Incluir ou excluir "Não sabe/Não sei" dos cálculos';
+                // Inicializar só se ainda não definido (preserva estado entre re-renders)
+                if (varMeta._nsIncluded === undefined) varMeta._nsIncluded = true;
+                const nsOn = varMeta._nsIncluded;
+                const nsIsNPS = varMeta.scale_info && varMeta.scale_info.type === 'NPS';
+                const nsOnClass = nsOn ? (nsIsNPS ? 'ns-on-nps' : 'ns-on') : 'ns-off';
+                nsToggleWrap.innerHTML = `
+                    <div class="ns-track ${{nsOnClass}}" id="ns-track-${{varMeta.name}}"><div class="ns-thumb"></div></div>
+                    <span class="ns-toggle-label" id="ns-lbl-${{varMeta.name}}">${{nsOn ? 'Incluir "Não sei"' : 'Excluir "Não sei"'}}</span>`;
+                nsToggleWrap.addEventListener('click', () => {{
+                    varMeta._nsIncluded = !varMeta._nsIncluded;
+                    const track = document.getElementById('ns-track-' + varMeta.name);
+                    const lbl   = document.getElementById('ns-lbl-' + varMeta.name);
+                    const isNps = varMeta.scale_info && varMeta.scale_info.type === 'NPS';
+                    if (track) track.className = 'ns-track ' + (varMeta._nsIncluded ? (isNps ? 'ns-on-nps' : 'ns-on') : 'ns-off');
+                    if (lbl)   lbl.textContent = varMeta._nsIncluded ? 'Incluir "Não sei"' : 'Excluir "Não sei"';
+                    renderAll();
+                }});
+                subtitle.appendChild(nsToggleWrap);
             }}
 
             // Skip logic: pill âmbar com tooltip (ao lado do type-pill)
@@ -4794,46 +5200,55 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             const now = new Date();
             const dateStr = now.toLocaleString('pt-BR');
             const activeFilters = getActiveFiltersDescription();
+            const totalFiltW = filteredRecs.reduce((s,r) => s + (r.__weight__ || 1), 0);
+            const totalAllW  = RECORDS.reduce((s,r) => s + (r.__weight__ || 1), 0);
             const summaryRows = [
                 ['RESUMO DA EXPORTAÇÃO'],
                 [],
                 ['Arquivo', '{file_source}'],
                 ['Gerado em', dateStr],
                 ['Total de respondentes (base)', RECORDS.length],
-                ['Respondentes após filtros', totalFilt],
+                ['Total de respondentes ponderado (base)', Math.round(totalAllW * 100) / 100],
+                ['Respondentes após filtros (n bruto)', totalFilt],
+                ['Respondentes após filtros (ponderado)', Math.round(totalFiltW * 100) / 100],
                 ['Variáveis analisadas', VARS_META.length],
                 ['Filtros aplicados', activeFilters.join(' | ')],
             ];
             const wsSum = XLSX.utils.aoa_to_sheet(summaryRows);
-            wsSum['!cols'] = [{{wch:28}}, {{wch:55}}];
+            wsSum['!cols'] = [{{wch:38}}, {{wch:55}}];
             wsSum['!merges'] = [{{s:{{r:0,c:0}}, e:{{r:0,c:1}}}}];
             XLSX.utils.book_append_sheet(wb, wsSum, 'Resumo');
 
-            // ── ABA 2: DICIONÁRIO com N válido filtrado ──
+            // ── ABA 2: DICIONÁRIO com N válido ponderado e bruto ──
             function countValid(vm) {{
                 const vname = vm.name;
                 const vtype = vm.var_type || vm.type || 'single';
                 if (vtype === 'multiple_response' || vtype === 'mr') {{
-                    return filteredRecs.filter(r => r[vname] && r[vname].length > 0).length;
+                    return filteredRecs.filter(r => r[vname] && r[vname].length > 0);
                 }}
-                return filteredRecs.filter(r => r[vname] !== null && r[vname] !== undefined).length;
+                return filteredRecs.filter(r => r[vname] !== null && r[vname] !== undefined);
+            }}
+            function weightedN(recs) {{
+                return Math.round(recs.reduce((s,r) => s + (r.__weight__ || 1), 0) * 100) / 100;
             }}
 
-            const dictRows = [['Nº','Variável SPSS','Pergunta','Tipo','N válidos (filtrado)','N missing','Filtrada por']];
+            const dictRows = [['Nº','Variável SPSS','Pergunta','Tipo','N válido ponderado','N válido bruto','N missing','Filtrada por']];
             VARS_META.forEach(vm => {{
                 const pNum = vm._rendered_p_num ? 'P' + vm._rendered_p_num : (vm.p_num ? 'P' + vm.p_num : '');
-                const nv = countValid(vm);
-                const nm = totalFilt - nv;
+                const validRecs = countValid(vm);
+                const nvW = weightedN(validRecs);
+                const nvBruto = validRecs.length;
+                const nm = totalFilt - nvBruto;
                 const sl = vm.skip_logic;
                 let filtradaPor = '';
                 if (sl) {{
                     const src = VARS_META.find(v => v.name === sl.source_var);
                     filtradaPor = src && src.p_num ? 'P' + src.p_num : sl.source_var;
                 }}
-                dictRows.push([pNum, vm.sheet_code || vm.name, vm.title || '', vm.spss_type || '', nv, nm, filtradaPor]);
+                dictRows.push([pNum, vm.sheet_code || vm.name, vm.title || '', vm.spss_type || '', nvW, nvBruto, nm, filtradaPor]);
             }});
             const wsDic = XLSX.utils.aoa_to_sheet(dictRows);
-            wsDic['!cols'] = [{{wch:6}},{{wch:14}},{{wch:55}},{{wch:20}},{{wch:18}},{{wch:10}},{{wch:12}}];
+            wsDic['!cols'] = [{{wch:6}},{{wch:14}},{{wch:55}},{{wch:20}},{{wch:20}},{{wch:14}},{{wch:10}},{{wch:12}}];
             XLSX.utils.book_append_sheet(wb, wsDic, 'Dicionário');
 
             const usedNames = new Set(['Resumo','Dicionário']);

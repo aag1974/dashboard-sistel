@@ -33,6 +33,9 @@ class DashboardManagerOverlay:
             "architecture": "v2_overlay",
             "description": "Sistema onde header SPSS sobrepõe interface com navegação lateral otimizada",
             "client_logo": "",  # URL da logomarca do cliente
+            "password": "",  # Senha de acesso (vazio = sem senha)
+            "welcome_title": "",  # Título na tela de boas-vindas (vazio = usa title)
+            "welcome_message": "Selecione uma análise no menu lateral para começar.",  # Mensagem de boas-vindas
             "items": [
                 {
                     "id": "home",
@@ -649,7 +652,7 @@ class DashboardManagerOverlay:
         /* ── SIDEBAR ── */
         .sidebar {{
             width: 220px; background: white;
-            border-right: 0.5px solid var(--border);
+            box-shadow: 4px 0 16px rgba(0,0,0,0.08);
             display: flex; flex-direction: column;
             flex-shrink: 0; transition: width 0.25s ease; z-index: 1000;
         }}
@@ -675,8 +678,8 @@ class DashboardManagerOverlay:
         .sidebar-menu::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 3px; }}
 
         .menu-item {{
-            display: flex; align-items: center; gap: 9px;
-            padding: 9px 14px; cursor: pointer;
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 16px 10px 18px; cursor: pointer;
             border-left: 2px solid transparent;
             font-size: 13px; color: var(--text);
             transition: background 0.15s, border-color 0.15s;
@@ -690,8 +693,13 @@ class DashboardManagerOverlay:
         .menu-text {{ flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity 0.2s; }}
         .sidebar.collapsed .menu-text {{ opacity: 0; pointer-events: none; }}
 
-        .expand-icon {{ font-size: 9px; color: #bbb; transition: transform 0.2s; flex-shrink: 0; }}
-        .menu-item.group-open .expand-icon {{ transform: rotate(90deg); }}
+        .expand-icon {{
+            font-size: 8px; color: #bbb;
+            transition: transform 0.2s; flex-shrink: 0;
+            order: -1;  /* move para antes do texto */
+            width: 12px; text-align: center;
+        }}
+        .menu-item.group-open .expand-icon {{ transform: rotate(90deg); color: var(--teal); }}
         .sidebar.collapsed .expand-icon {{ display: none; }}
 
         .menu-tooltip {{
@@ -707,14 +715,14 @@ class DashboardManagerOverlay:
             transition: max-height 0.25s ease;
             background: rgba(123,175,192,0.03);
             border-left: 2px solid var(--border);
-            margin-left: 22px;
+            margin-left: 30px;
         }}
         .submenu.open {{ max-height: 600px; }}
         .sidebar.collapsed .submenu {{ display: none; }}
 
         .submenu-item {{
-            padding: 7px 10px 7px 12px;
-            font-size: 12px; color: var(--text-light);
+            padding: 8px 16px 8px 14px;
+            font-size: 13px; color: var(--text-light);
             cursor: pointer; border-left: 2px solid transparent;
             transition: background 0.15s, color 0.15s, border-color 0.15s;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -774,11 +782,14 @@ class DashboardManagerOverlay:
         .welcome {{
             display: flex; flex-direction: column;
             align-items: center; justify-content: center;
-            height: 100vh; text-align: center; padding: 40px; background: white;
+            height: 100vh; text-align: center; padding: 60px 40px; background: white;
         }}
-        .welcome-icon {{ font-size: 48px; margin-bottom: 16px; }}
-        .welcome h2 {{ color: var(--teal-dark); font-size: 20px; margin-bottom: 8px; font-weight: 500; }}
-        .welcome p {{ color: var(--text-light); max-width: 420px; line-height: 1.6; font-size: 14px; }}
+        .welcome-inner {{
+            display: flex; align-items: center; gap: 64px;
+            width: 100%; max-width: 860px;
+        }}
+        .welcome-stat-n {{ font-size: 40px; font-weight: 500; color: var(--teal-dark); }}
+        .welcome-stat-lbl {{ font-size: 11px; color: #aaa; margin-top: 6px; text-transform: uppercase; letter-spacing: .05em; }}
 
         .error-state {{
             display: flex; flex-direction: column;
@@ -816,13 +827,90 @@ class DashboardManagerOverlay:
 
     <div class="mobile-overlay" id="mobileOverlay" onclick="closeMobile()"></div>
 
+    <!-- TELA DE SENHA -->
+    <div id="passwordScreen" style="
+        position:fixed;top:0;left:0;right:0;bottom:0;
+        background:#f4f7f9;display:flex;align-items:center;justify-content:center;
+        z-index:9999;flex-direction:column;">
+        <div style="background:white;border:0.5px solid #e5e5e5;border-radius:16px;
+            padding:48px 56px;text-align:center;max-width:420px;width:90%;
+            box-shadow:0 4px 32px rgba(0,0,0,0.08);">
+
+            <!-- Logo do cliente -->
+            <div id="pwLogoArea" style="margin-bottom:36px;min-height:20px;"></div>
+
+            <!-- Aviso de conteúdo restrito em destaque -->
+            <div style="background:#EDF5F7;border:0.5px solid rgba(123,175,192,0.35);
+                border-radius:8px;padding:12px 16px;margin-bottom:28px;">
+                <p style="font-size:13px;font-weight:600;color:#4d8a9e;margin:0;">
+                    🔒 Conteúdo restrito
+                </p>
+                <p style="font-size:12px;color:#6c757d;margin:6px 0 0;line-height:1.5;">
+                    Digite a senha fornecida para acessar este painel.
+                </p>
+            </div>
+
+            <!-- Campo de senha -->
+            <div style="position:relative;margin-bottom:12px;">
+                <input type="password" id="pwInput" placeholder="Senha de acesso"
+                    style="width:100%;padding:12px 44px 12px 14px;border:0.5px solid #ddd;border-radius:8px;
+                        font-size:14px;outline:none;transition:border-color .15s;box-sizing:border-box;color:#333;"
+                    onkeydown="if(event.key==='Enter')checkPassword()"
+                    onfocus="this.style.borderColor='#7BAFC0'" onblur="this.style.borderColor='#ddd'">
+                <span onclick="togglePwVis()" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);
+                    cursor:pointer;font-size:15px;color:#bbb;user-select:none;" id="pwEye">👁</span>
+            </div>
+            <p id="pwError" style="color:#B83B5C;font-size:12px;margin-bottom:10px;min-height:18px;"></p>
+
+            <!-- Botão entrar -->
+            <button onclick="checkPassword()" style="width:100%;padding:12px;background:#7BAFC0;color:white;
+                border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;letter-spacing:.02em;
+                transition:background .15s;" onmouseover="this.style.background='#4d8a9e'"
+                onmouseout="this.style.background='#7BAFC0'">Entrar</button>
+
+            <!-- Rodapé Opinião -->
+            <div style="margin-top:32px;padding-top:24px;border-top:0.5px solid #f0f0f0;">
+                <p style="font-size:11px;color:#bbb;margin-bottom:8px;letter-spacing:.02em;">
+                    Dashboard desenvolvido por
+                </p>
+                <img src="Logo_Opiniao.png" style="height:26px;opacity:.7;"
+                    onerror="this.style.display='none'">
+            </div>
+        </div>
+    </div>
+
     <div class="main-content">
         <iframe class="content-frame" id="contentFrame" style="display:none;"></iframe>
-        <div class="welcome" id="welcomeState" style="display:none;">
-            <h2>{title}</h2>
-            <p>Selecione uma análise no menu lateral para começar.</p>
+        <div class="welcome" id="welcomeState" style="display:none;flex-direction:row;align-items:stretch;padding:0;text-align:left;height:100vh;">
+            <div style="width:280px;background:var(--teal-light);display:flex;flex-direction:column;justify-content:space-between;padding:40px 30px;flex-shrink:0;border-right:0.5px solid rgba(123,175,192,0.2);">
+                <div>
+                    <div style="font-size:11px;font-weight:600;color:var(--teal);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;">Painel de Resultados</div>
+                    <div style="font-size:18px;font-weight:500;color:#333;line-height:1.4;margin-bottom:20px;" id="welcomeTitle">Explore os resultados das pesquisas por tema</div>
+                    <div style="height:0.5px;background:rgba(123,175,192,0.25);margin-bottom:20px;"></div>
+                    <div style="font-size:13px;color:#6c757d;line-height:1.75;" id="welcomeMsg">Use o menu lateral para navegar entre os módulos. Cada tema apresenta análises detalhadas com gráficos interativos e filtros.</div>
+                    <div style="display:flex;gap:10px;margin-top:24px;">
+                        <div style="flex:1;text-align:center;background:white;border-radius:8px;padding:14px 8px;border:0.5px solid rgba(123,175,192,0.2);">
+                            <div style="font-size:24px;font-weight:500;color:var(--teal-dark);" id="statTemas">—</div>
+                            <div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-top:4px;">Temas</div>
+                        </div>
+                        <div style="flex:1;text-align:center;background:white;border-radius:8px;padding:14px 8px;border:0.5px solid rgba(123,175,192,0.2);">
+                            <div style="font-size:24px;font-weight:500;color:var(--teal-dark);" id="statPesquisas">—</div>
+                            <div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-top:4px;">Pesquisas</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;">
+                <div style="flex:1;padding:36px 44px;overflow-y:auto;">
+                    <div style="font-size:11px;font-weight:600;color:var(--teal);letter-spacing:.06em;text-transform:uppercase;margin-bottom:18px;">Temas disponíveis</div>
+                    <div id="welcomeThemes" style="display:flex;flex-direction:column;gap:10px;"></div>
+                </div>
+                <div style="padding:16px 44px;border-top:0.5px solid #f0f0f0;">
+                    <span style="font-size:12px;color:#bbb;">Dados que orientam decisões</span>
+                </div>
+            </div>
         </div>
-        <div class="loading" id="loadingState" style="display:none;">
+                <div class="loading" id="loadingState" style="display:none;">
             <div class="loading-dot"></div>
             <div class="loading-dot"></div>
             <div class="loading-dot"></div>
@@ -833,6 +921,91 @@ class DashboardManagerOverlay:
 
 <script>
     const menuConfig = {menu_config_json};
+    const DASH_PASSWORD = menuConfig.password || '';
+    const WELCOME_TITLE = menuConfig.welcome_title || menuConfig.title || '';
+    const WELCOME_MSG   = menuConfig.welcome_message || 'Selecione uma análise no menu lateral para começar.';
+    const CLIENT_LOGO   = menuConfig.client_logo || '';
+
+    // Tela de senha
+    function initPasswordScreen() {{
+        if (!DASH_PASSWORD) {{
+            document.getElementById('passwordScreen').style.display = 'none';
+            initWelcome();
+            return;
+        }}
+        // Verificar se já passou pela senha nesta sessão
+        if (sessionStorage.getItem('dash_auth') === DASH_PASSWORD) {{
+            document.getElementById('passwordScreen').style.display = 'none';
+            initWelcome();
+            return;
+        }}
+        // Mostrar logo na tela de senha
+        if (CLIENT_LOGO) {{
+            const pwImg = document.createElement('img');
+            pwImg.src = CLIENT_LOGO;
+            pwImg.style.cssText = 'max-height:64px;max-width:200px;object-fit:contain;';
+            pwImg.onerror = function() {{ this.style.display='none'; }};
+            document.getElementById('pwLogoArea').appendChild(pwImg);
+        }}
+    }}
+
+    function checkPassword() {{
+        const input = document.getElementById('pwInput').value;
+        if (input === DASH_PASSWORD) {{
+            sessionStorage.setItem('dash_auth', DASH_PASSWORD);
+            document.getElementById('passwordScreen').style.display = 'none';
+            initWelcome();
+        }} else {{
+            const err = document.getElementById('pwError');
+            err.textContent = 'Senha incorreta. Tente novamente.';
+            document.getElementById('pwInput').value = '';
+            document.getElementById('pwInput').focus();
+            setTimeout(() => {{ err.textContent = ''; }}, 3000);
+        }}
+    }}
+
+    function togglePwVis() {{
+        const inp = document.getElementById('pwInput');
+        inp.type = inp.type === 'password' ? 'text' : 'password';
+    }}
+
+    function initWelcome() {{
+        let nTemas = 0, nPesquisas = 0;
+        const themesEl = document.getElementById('welcomeThemes');
+
+        (menuConfig.items || []).forEach(item => {{
+            if (item.type === 'group') {{
+                nTemas++;
+                if (themesEl) {{
+                    const card = document.createElement('div');
+                    card.style.cssText = 'display:flex;align-items:center;gap:14px;padding:14px 18px;border:0.5px solid #e5e5e5;border-radius:8px;cursor:pointer;transition:border-color .15s,background .15s;';
+                    card.onmouseenter = function() {{ this.style.borderColor='#7BAFC0'; this.style.background='#f9fdfe'; }};
+                    card.onmouseleave = function() {{ this.style.borderColor='#e5e5e5'; this.style.background='white'; }};
+                    card.onclick = function() {{ renderMenu(); }};
+                    const dot = document.createElement('div');
+                    dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:#7BAFC0;flex-shrink:0;';
+                    const name = document.createElement('span');
+                    name.style.cssText = 'font-size:14px;color:#333;';
+                    name.textContent = item.title;
+                    card.appendChild(dot);
+                    card.appendChild(name);
+                    themesEl.appendChild(card);
+                }}
+                (item.children || []).forEach(child => {{ if (child.file) nPesquisas++; }});
+            }} else if (item.file) {{
+                nPesquisas++;
+            }}
+        }});
+
+        const el = (id) => document.getElementById(id);
+        if (el('statTemas'))     el('statTemas').textContent     = nTemas     || '—';
+        if (el('statPesquisas')) el('statPesquisas').textContent = nPesquisas || '—';
+
+        showWelcome();
+    }}
+
+    // Inicializar ao carregar
+    window.addEventListener('DOMContentLoaded', initPasswordScreen);
     let collapsed = false;
     let isMobile = window.innerWidth <= 768;
     let currentAnalysisFrame = null;
@@ -1031,20 +1204,21 @@ def main():
     
     while True:
         print(f"\n📋 MENU:")
-        print("1. 🎯 Adicionar análise v2.0")
-        print("2. 📁 Criar grupo")
-        print("3. 📋 Listar estrutura")
-        print("4. 🗑️  Remover item")
-        print("5. 🌐 Gerar Dashboard Master overlay")
-        print("6. 📤 Exportar configuração")
-        print("7. 📥 Importar configuração") 
-        print("8. 🔍 Verificar status overlay")
-        print("9. 🎨 Ver opções de emojis")
+        print("1.  🎯 Adicionar análise")
+        print("2.  📁 Criar grupo")
+        print("3.  📋 Listar estrutura")
+        print("4.  🗑️  Remover item")
+        print("5.  🌐 Gerar Dashboard Master")
+        print("6.  📤 Exportar configuração")
+        print("7.  📥 Importar configuração")
+        print("8.  🔍 Verificar status")
+        print("9.  🎨 Ver opções de emojis")
         print("10. 📋 Ver templates predefinidos")
         print("11. 🎯 Aplicar template predefinido")
         print("12. 🏢 Atualizar logo do cliente")
-        print("13. ✏️ Editor de menu (reordenar, editar)")
-        print("14. ❌ Sair")
+        print("13. ✏️  Editor de menu (reordenar, editar)")
+        print("14. 🔒 Configurar senha e boas-vindas")
+        print("0.  ❌ Sair")
         
         choice = input("\n👉 Escolha uma opção: ").strip()
         
@@ -1212,6 +1386,46 @@ def main():
             manager.menu_editor_interface()
         
         elif choice == "14":
+            print("\n🔒 CONFIGURAR SENHA E BOAS-VINDAS")
+            print("-" * 40)
+
+            # Senha
+            current_pw = manager.config.get("password", "")
+            if current_pw:
+                print(f"Senha atual: {'*' * len(current_pw)} ({len(current_pw)} caracteres)")
+            else:
+                print("Senha atual: nenhuma (dashboard aberto)")
+
+            new_pw = input("\nNova senha (Enter para manter, 'remover' para apagar): ").strip()
+            if new_pw.lower() == 'remover':
+                manager.config["password"] = ""
+                print("✅ Senha removida — dashboard ficará sem proteção")
+            elif new_pw:
+                manager.config["password"] = new_pw
+                print(f"✅ Senha definida: {new_pw}")
+            else:
+                print("Senha mantida sem alteração")
+
+            # Título de boas-vindas
+            current_wt = manager.config.get("welcome_title", "")
+            print(f"\nTítulo de boas-vindas atual: '{current_wt or '(usa título geral)'}'")
+            new_wt = input("Novo título (Enter para manter): ").strip()
+            if new_wt:
+                manager.config["welcome_title"] = new_wt
+                print(f"✅ Título definido: {new_wt}")
+
+            # Mensagem de boas-vindas
+            current_wm = manager.config.get("welcome_message", "")
+            print(f"\nMensagem atual: '{current_wm}'")
+            new_wm = input("Nova mensagem (Enter para manter): ").strip()
+            if new_wm:
+                manager.config["welcome_message"] = new_wm
+                print(f"✅ Mensagem definida")
+
+            manager.save_config()
+            print("\n💡 Regenere o dashboard (opção 5) para aplicar as alterações.")
+
+        elif choice == "0":
             print("👋 Até logo!")
             break
         
