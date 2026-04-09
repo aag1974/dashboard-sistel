@@ -1026,10 +1026,16 @@
         }
 
         function applyFilters() {
+            const _scrollY = window.scrollY;
             document.querySelectorAll('.dropdown-content').forEach(d => d.classList.remove('show'));
             document.querySelectorAll('.dropdown-button').forEach(b => b.classList.remove('open'));
-            renderAll();
+            const cleanup = renderAll();
             updateFilterCounts();
+            // Duplo rAF: 1º garante repaint, 2º aplica scroll após layout estabilizado
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                window.scrollTo({ top: _scrollY, behavior: 'instant' });
+                cleanup();
+            }));
         }
 
         // ===== DRILLDOWN (clique em barras) =====
@@ -1048,13 +1054,23 @@
         function toggleDrilldown(varName, rawValue) {
             const s = getDrilldownSet(varName);
             const k = _norm(rawValue);
-
             if (s.has(k)) s.delete(k);
             else s.add(k);
-
             if (s.size === 0) DRILLDOWN.delete(varName);
 
-            renderAll();
+            const anchor = document.getElementById('section-' + varName);
+            const topBefore = anchor ? anchor.getBoundingClientRect().top : 0;
+
+            const cleanup = renderAll();
+
+            requestAnimationFrame(() => {
+                const anchorAfter = document.getElementById('section-' + varName);
+                if (anchorAfter) {
+                    const topAfter = anchorAfter.getBoundingClientRect().top;
+                    window.scrollBy({ top: topAfter - topBefore, behavior: 'instant' });
+                }
+                cleanup();
+            });
         }
 
         function clearAllDrilldowns() {
@@ -1118,11 +1134,14 @@
 
         // RENDERIZAÇÃO
         function renderAll() {
-            const _scrollY = window.scrollY;
-            const filteredRecordsAll = getFilteredRecords(null);
             const content = document.getElementById('content');
+            // Desabilitar scroll anchoring + travar altura
+            const prevAnchor = document.body.style.overflowAnchor;
+            document.body.style.overflowAnchor = 'none';
+            content.style.overflowAnchor = 'none';
+            content.style.minHeight = content.offsetHeight + 'px';
             content.innerHTML = '';
-            
+
             let pCounter = 0;
             VARS_META.forEach((varMeta) => {
                 const recordsForVar = getFilteredRecords(varMeta.name);
@@ -1130,7 +1149,6 @@
                 if (section) {
                     pCounter++;
                     varMeta._rendered_p_num = pCounter;
-                    // Inserir número P como span logo após o ponto colorido
                     const titleEl = section.querySelector('.section-title');
                     if (titleEl) {
                         const titleColor = titleEl.style.color || 'var(--primary-dark)';
@@ -1143,10 +1161,8 @@
                     content.appendChild(section);
                 }
             });
-            // Restaurar posição de scroll com duplo rAF (garante DOM reconstruído)
-            requestAnimationFrame(() => requestAnimationFrame(() =>
-                window.scrollTo({ top: _scrollY, behavior: 'instant' })
-            ));
+            // Retorna cleanup — o chamador deve invocar após restaurar o scroll
+            return () => { content.style.minHeight = ''; content.style.overflowAnchor = ''; document.body.style.overflowAnchor = prevAnchor; };
         }
 
 
@@ -2073,7 +2089,14 @@
                     const isNps = varMeta.scale_info && varMeta.scale_info.type === 'NPS';
                     if (track) track.className = 'ns-track ' + (varMeta._nsIncluded ? (isNps ? 'ns-on-nps' : 'ns-on') : 'ns-off');
                     if (lbl)   lbl.textContent = varMeta._nsIncluded ? 'Incluir "Não sei"' : 'Excluir "Não sei"';
-                    renderAll();
+                    const nsAnchor = document.getElementById('section-' + varMeta.name);
+                    const nsTopBefore = nsAnchor ? nsAnchor.getBoundingClientRect().top : 0;
+                    const nsCleanup = renderAll();
+                    requestAnimationFrame(() => {
+                        const nsAfter = document.getElementById('section-' + varMeta.name);
+                        if (nsAfter) window.scrollBy({ top: nsAfter.getBoundingClientRect().top - nsTopBefore, behavior: 'instant' });
+                        nsCleanup();
+                    });
                 });
                 subtitle.appendChild(nsToggleWrap);
             }
@@ -2200,18 +2223,20 @@
                 return Math.round(recs.reduce((s,r) => s + (r.__weight__ || 1), 0) * 100) / 100;
             }
 
-            const dictRows = [['Nº','Variável SPSS','Pergunta','Tipo','N válido ponderado','N válido bruto','N missing','Filtrada por']];
+            const dictRows = [['Nº','Variável SPSS','Pergunta','Tipo','N válido ponderado','N válido bruto','N missing (bruto)','Filtrada por']];
             VARS_META.forEach(vm => {
-                const pNum = vm._rendered_p_num ? 'P' + vm._rendered_p_num : (vm.p_num ? 'P' + vm.p_num : '');
+                // P número: se foi renderizado usa o número sequencial, senão indica que não apareceu
+                const pNum = vm._rendered_p_num ? 'P' + vm._rendered_p_num : '–';
                 const validRecs = countValid(vm);
                 const nvW = weightedN(validRecs);
                 const nvBruto = validRecs.length;
+                // N missing = registros filtrados que NÃO têm resposta válida
                 const nm = totalFilt - nvBruto;
                 const sl = vm.skip_logic;
                 let filtradaPor = '';
                 if (sl) {
                     const src = VARS_META.find(v => v.name === sl.source_var);
-                    filtradaPor = src && src.p_num ? 'P' + src.p_num : sl.source_var;
+                    filtradaPor = src && src._rendered_p_num ? 'P' + src._rendered_p_num : (sl.source_var || '');
                 }
                 dictRows.push([pNum, vm.sheet_code || vm.name, vm.title || '', vm.spss_type || '', nvW, nvBruto, nm, filtradaPor]);
             });

@@ -1772,54 +1772,142 @@ class UniversalMRDetector:
 
 def detect_mr_groups_improved(selected_vars: List[str], meta, df) -> Tuple[Dict[str, Dict], List[str]]:
     """
-    Detecta grupos MR. Pre-detecta padrao _ON (slots de MR categorica)
-    antes de passar para o UniversalMRDetector.
+    Detecta grupos MR usando sinais puramente estruturais — sem depender de nomes de variáveis:
+    1. Agrupa vars com value labels idênticos
+    2. Sub-agrupa por label text idêntico (removendo conteúdo entre colchetes)
+    3. Exige sufixo numérico em todos os membros
+    4. Classifica: stacked (fill decrescente) ou binary (fills similares)
+    Mantém pré-detecção _On para compatibilidade com bases antigas.
     """
     import re as _re
+    from collections import defaultdict as _dd
 
-    valabs = get_value_labels_map(meta)
+    labels_map = dict(zip(meta.column_names, meta.column_labels))
+    valabs     = get_value_labels_map(meta)
 
-    # ── PRÉ-DETECÇÃO: padrão PREFIX_O\d+ (ex: Q_25_O1~O5, Q_31_O1~O9) ──
+    def _strip_bracket(s):
+        return _re.sub(r'^\s*\[.*?\]\s*', '', s or '').strip()
+
+    def _num_suffix(v):
+        m = _re.search(r'(\d+)$', v)
+        return int(m.group(1)) if m else None
+
+    pre_detected: Dict[str, Dict] = {}
+    pre_detected_members: set = set()
+
+    # ── PASSO 1: Pré-detecção _O\d+ (slots explícitos, ex: Q_25_O1) ──
     slot_pattern = _re.compile(r'^(.+)_O(\d+)$', _re.IGNORECASE)
     slot_buckets: Dict[str, List[str]] = {}
     for v in selected_vars:
         m = slot_pattern.match(v)
         if m:
-            prefix = m.group(1)
-            slot_buckets.setdefault(prefix, []).append(v)
-
-    pre_detected: Dict[str, Dict] = {}
-    pre_detected_members: set = set()
+            slot_buckets.setdefault(m.group(1), []).append(v)
 
     for prefix, members in slot_buckets.items():
         if len(members) < 2:
             continue
-        # Ordenar pelos índices
-        members_sorted = sorted(members,
-            key=lambda v: int(slot_pattern.match(v).group(2)))
-
-        # Título: usar label do primeiro membro (sem o "[Other specify]" final)
+        members_sorted = sorted(members, key=lambda v: int(slot_pattern.match(v).group(2)))
         raw_title = get_var_label(meta, members_sorted[0])
         title = _re.sub(r'\s*\[.*?\]\s*$', '', raw_title).strip()
-
-        # Tipo: verificar se é binário (0/1) ou categórico por slots
         mr_subtype = detect_mr_type_improved(members_sorted, meta, df) or 'categorical'
-
-        group_name = prefix
-        pre_detected[group_name] = {
-            "title": title,
-            "members": members_sorted,
-            "mr_subtype": mr_subtype,
-            "other_var": None,
-            "base": prefix,
+        pre_detected[prefix] = {
+            "title": title, "members": members_sorted,
+            "mr_subtype": mr_subtype, "other_var": None, "base": prefix,
         }
         pre_detected_members.update(members_sorted)
-        print(f"   🔗 Pré-detectado MR _O\\d+: {group_name} → {members_sorted} ({mr_subtype})")
+        print(f"   🔗 MR _On: {prefix} → {members_sorted} ({mr_subtype})")
 
-    # Remover membros já agrupados das vars passadas ao detector universal
+    # ── PASSO 2: Detecção estrutural pura (value labels + label text + sufixo numérico) ──
+    remaining = [v for v in selected_vars if v not in pre_detected_members]
+
+    # Detecta escala avaliativa ordinal — exclui baterias do MR
+    _SCALE_WORDS = {
+        'satisfeito','insatisfeito','satisfacao','satisfação',
+        'possui','concordo','discordo','bom','ótimo','otimo',
+        'ruim','péssimo','pessimo','nunca','raramente','sempre',
+        'frequente','muito','totalmente','parcialmente','adequado',
+        'aprovado','reprovado','sim','não','nao','acessou',
+    }
+    def _is_ordinal_scale(vl_dict):
+        if not vl_dict:
+            return False
+        ns_vals = {99,999,9000,9999,98,8888,88,9998,9997}
+        main = {k: v for k, v in vl_dict.items()
+                if k not in ns_vals and not any(
+                    w in str(v).lower()
+                    for w in ('não sabe','nao sabe','não se aplica','nao se aplica','não citar','nao citar')
+                )}
+        n = len(main)
+        if n < 2 or n > 8:
+            return False
+        text = ' '.join(str(v).lower() for v in main.values())
+        return any(w in text for w in _SCALE_WORDS)
+
+    # Agrupar por value labels idênticos
+    vl_groups: Dict[tuple, List[str]] = _dd(list)
+    for v in remaining:
+        vl = valabs.get(v, {})
+        if not vl:
+            continue
+        # Excluir grupos de escala avaliativa (são baterias, não MR)
+        if _is_ordinal_scale(vl):
+            continue
+        key = tuple(sorted(
+            (str(round(float(k), 4) if isinstance(k, float) else k), str(lbl))
+            for k, lbl in vl.items()
+        ))
+        vl_groups[key].append(v)
+
+    for vl_key, cols in vl_groups.items():
+        if len(cols) < 2:
+            continue
+        # Sub-agrupar por label text idêntico (sem bracket)
+        lbl_groups: Dict[str, List[str]] = _dd(list)
+        for v in cols:
+            lbl = _strip_bracket(labels_map.get(v, '')).strip()
+            lbl_groups[lbl].append(v)
+
+        for lbl_text, group in lbl_groups.items():
+            if len(group) < 2:
+                continue
+            # Exigir sufixo numérico em todos
+            if not all(_num_suffix(v) is not None for v in group):
+                continue
+            # Filtrar já detectados
+            group = [v for v in group if v not in pre_detected_members]
+            if len(group) < 2:
+                continue
+
+            # Ordenar pelo sufixo numérico
+            group_sorted = sorted(group, key=lambda v: _num_suffix(v))
+
+            fills = [df[v].notna().sum() / len(df) for v in group_sorted]
+            f0 = fills[0] if fills else 0
+            f1 = fills[1] if len(fills) > 1 else 0
+
+            # Stacked: primeiro >> segundo (ex: 100% vs 5%)
+            is_stacked = f0 > 0 and f1 < f0 * 0.4
+            # Binary: fills homogêneos
+            fill_range = max(fills) - min(fills)
+            is_binary  = fill_range < 0.25
+
+            if not (is_stacked or is_binary):
+                continue
+
+            mr_subtype = detect_mr_type_improved(group_sorted, meta, df) or 'categorical'
+            group_name = group_sorted[0]  # usar primeiro membro como chave única
+
+            title = _strip_bracket(lbl_text) or get_var_label(meta, group_sorted[0])
+            pre_detected[group_name] = {
+                "title": title, "members": group_sorted,
+                "mr_subtype": mr_subtype, "other_var": None, "base": group_name,
+            }
+            pre_detected_members.update(group_sorted)
+            kind = 'stacked' if is_stacked else 'binary'
+            print(f"   🔗 MR estrutural [{kind}]: {group_sorted[0]}…{group_sorted[-1]} ({mr_subtype})")
+
+    # ── PASSO 3: Detector universal para o restante ──
     remaining_vars = [v for v in selected_vars if v not in pre_detected_members]
-
-    # ── DETECTOR UNIVERSAL para o restante ──
     config = {
         'min_group_size': 2,
         'label_similarity_threshold': 0.7,
@@ -1837,7 +1925,7 @@ def detect_mr_groups_improved(selected_vars: List[str], meta, df) -> Tuple[Dict[
     # Converter grupos universais para formato legado
     converted_mr_groups: Dict[str, Dict] = {}
 
-    # Primeiro: pré-detectados (MR slot)
+    # Primeiro: pré-detectados (estrutural + _O\d+)
     converted_mr_groups.update(pre_detected)
 
     # Segundo: grupos do detector universal
@@ -4058,10 +4146,16 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         }}
 
         function applyFilters() {{
+            const _scrollY = window.scrollY;
             document.querySelectorAll('.dropdown-content').forEach(d => d.classList.remove('show'));
             document.querySelectorAll('.dropdown-button').forEach(b => b.classList.remove('open'));
-            renderAll();
+            const cleanup = renderAll();
             updateFilterCounts();
+            // Duplo rAF: 1º garante repaint, 2º aplica scroll após layout estabilizado
+            requestAnimationFrame(() => requestAnimationFrame(() => {{
+                window.scrollTo({{ top: _scrollY, behavior: 'instant' }});
+                cleanup();
+            }}));
         }}
 
         // ===== DRILLDOWN (clique em barras) =====
@@ -4080,13 +4174,23 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         function toggleDrilldown(varName, rawValue) {{
             const s = getDrilldownSet(varName);
             const k = _norm(rawValue);
-
             if (s.has(k)) s.delete(k);
             else s.add(k);
-
             if (s.size === 0) DRILLDOWN.delete(varName);
 
-            renderAll();
+            const anchor = document.getElementById('section-' + varName);
+            const topBefore = anchor ? anchor.getBoundingClientRect().top : 0;
+
+            const cleanup = renderAll();
+
+            requestAnimationFrame(() => {{
+                const anchorAfter = document.getElementById('section-' + varName);
+                if (anchorAfter) {{
+                    const topAfter = anchorAfter.getBoundingClientRect().top;
+                    window.scrollBy({{ top: topAfter - topBefore, behavior: 'instant' }});
+                }}
+                cleanup();
+            }});
         }}
 
         function clearAllDrilldowns() {{
@@ -4150,11 +4254,14 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
 
         // RENDERIZAÇÃO
         function renderAll() {{
-            const _scrollY = window.scrollY;
-            const filteredRecordsAll = getFilteredRecords(null);
             const content = document.getElementById('content');
+            // Desabilitar scroll anchoring + travar altura
+            const prevAnchor = document.body.style.overflowAnchor;
+            document.body.style.overflowAnchor = 'none';
+            content.style.overflowAnchor = 'none';
+            content.style.minHeight = content.offsetHeight + 'px';
             content.innerHTML = '';
-            
+
             let pCounter = 0;
             VARS_META.forEach((varMeta) => {{
                 const recordsForVar = getFilteredRecords(varMeta.name);
@@ -4162,7 +4269,6 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 if (section) {{
                     pCounter++;
                     varMeta._rendered_p_num = pCounter;
-                    // Inserir número P como span logo após o ponto colorido
                     const titleEl = section.querySelector('.section-title');
                     if (titleEl) {{
                         const titleColor = titleEl.style.color || 'var(--primary-dark)';
@@ -4175,10 +4281,8 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     content.appendChild(section);
                 }}
             }});
-            // Restaurar posição de scroll com duplo rAF (garante DOM reconstruído)
-            requestAnimationFrame(() => requestAnimationFrame(() =>
-                window.scrollTo({{ top: _scrollY, behavior: 'instant' }})
-            ));
+            // Retorna cleanup — o chamador deve invocar após restaurar o scroll
+            return () => {{ content.style.minHeight = ''; content.style.overflowAnchor = ''; document.body.style.overflowAnchor = prevAnchor; }};
         }}
 
 
@@ -5105,7 +5209,14 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                     const isNps = varMeta.scale_info && varMeta.scale_info.type === 'NPS';
                     if (track) track.className = 'ns-track ' + (varMeta._nsIncluded ? (isNps ? 'ns-on-nps' : 'ns-on') : 'ns-off');
                     if (lbl)   lbl.textContent = varMeta._nsIncluded ? 'Incluir "Não sei"' : 'Excluir "Não sei"';
-                    renderAll();
+                    const nsAnchor = document.getElementById('section-' + varMeta.name);
+                    const nsTopBefore = nsAnchor ? nsAnchor.getBoundingClientRect().top : 0;
+                    const nsCleanup = renderAll();
+                    requestAnimationFrame(() => {{
+                        const nsAfter = document.getElementById('section-' + varMeta.name);
+                        if (nsAfter) window.scrollBy({{ top: nsAfter.getBoundingClientRect().top - nsTopBefore, behavior: 'instant' }});
+                        nsCleanup();
+                    }});
                 }});
                 subtitle.appendChild(nsToggleWrap);
             }}
@@ -5232,18 +5343,20 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 return Math.round(recs.reduce((s,r) => s + (r.__weight__ || 1), 0) * 100) / 100;
             }}
 
-            const dictRows = [['Nº','Variável SPSS','Pergunta','Tipo','N válido ponderado','N válido bruto','N missing','Filtrada por']];
+            const dictRows = [['Nº','Variável SPSS','Pergunta','Tipo','N válido ponderado','N válido bruto','N missing (bruto)','Filtrada por']];
             VARS_META.forEach(vm => {{
-                const pNum = vm._rendered_p_num ? 'P' + vm._rendered_p_num : (vm.p_num ? 'P' + vm.p_num : '');
+                // P número: se foi renderizado usa o número sequencial, senão indica que não apareceu
+                const pNum = vm._rendered_p_num ? 'P' + vm._rendered_p_num : '–';
                 const validRecs = countValid(vm);
                 const nvW = weightedN(validRecs);
                 const nvBruto = validRecs.length;
+                // N missing = registros filtrados que NÃO têm resposta válida
                 const nm = totalFilt - nvBruto;
                 const sl = vm.skip_logic;
                 let filtradaPor = '';
                 if (sl) {{
                     const src = VARS_META.find(v => v.name === sl.source_var);
-                    filtradaPor = src && src.p_num ? 'P' + src.p_num : sl.source_var;
+                    filtradaPor = src && src._rendered_p_num ? 'P' + src._rendered_p_num : (sl.source_var || '');
                 }}
                 dictRows.push([pNum, vm.sheet_code || vm.name, vm.title || '', vm.spss_type || '', nvW, nvBruto, nm, filtradaPor]);
             }});
