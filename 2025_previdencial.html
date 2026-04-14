@@ -2997,12 +2997,81 @@
             return header;
         }
 
+        // ── MODAL DE ESCOLHA DO MODO PDF ──
+        function showPDFModeDialog() {
+            return new Promise(resolve => {
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+
+                const card = document.createElement('div');
+                card.style.cssText = 'background:white;border-radius:14px;padding:32px 36px;max-width:520px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,0.18);';
+
+                card.innerHTML =
+                    '<div style="font-size:11px;font-weight:600;color:#7BAFC0;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Exportar PDF</div>' +
+                    '<div style="font-size:17px;font-weight:500;color:#333;margin-bottom:6px;">Como exportar as tabelas?</div>' +
+                    '<div style="font-size:13px;color:#888;margin-bottom:24px;">Tabelas longas (respostas abertas, muitos itens) podem ficar cortadas no modo dashboard.</div>' +
+                    '<div style="display:flex;gap:12px;margin-bottom:20px;">' +
+                      '<div id="pdf-opt-dashboard" style="flex:1;border:1.5px solid #7BAFC0;border-radius:10px;padding:16px;cursor:pointer;background:#EDF5F7;">' +
+                        '<div style="font-size:13px;font-weight:600;color:#4d8a9e;margin-bottom:4px;">Modo dashboard</div>' +
+                        '<div style="font-size:12px;color:#6c757d;line-height:1.5;">Mantém o layout atual. Tabelas longas ficam cortadas como no navegador.</div>' +
+                      '</div>' +
+                      '<div id="pdf-opt-expand" style="flex:1;border:1.5px solid #dde5ea;border-radius:10px;padding:16px;cursor:pointer;">' +
+                        '<div style="font-size:13px;font-weight:600;color:#333;margin-bottom:4px;">Tabelas expandidas</div>' +
+                        '<div style="font-size:12px;color:#6c757d;line-height:1.5;">Exibe todos os itens integralmente. Ideal para relatórios completos.</div>' +
+                      '</div>' +
+                    '</div>' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                      '<button id="pdf-cancel-btn" style="background:none;border:none;color:#aaa;font-size:13px;cursor:pointer;padding:0;">Cancelar</button>' +
+                      '<button id="pdf-confirm-btn" style="background:#7BAFC0;color:white;border:none;border-radius:7px;padding:10px 24px;font-size:13px;font-weight:600;cursor:pointer;">Gerar PDF</button>' +
+                    '</div>';
+
+                overlay.appendChild(card);
+                document.body.appendChild(overlay);
+
+                let selectedMode = 'dashboard';
+
+                const optDash = document.getElementById('pdf-opt-dashboard');
+                const optExp  = document.getElementById('pdf-opt-expand');
+
+                function selectMode(mode) {
+                    selectedMode = mode;
+                    if (mode === 'dashboard') {
+                        optDash.style.border = '1.5px solid #7BAFC0';
+                        optDash.style.background = '#EDF5F7';
+                        optExp.style.border  = '1.5px solid #dde5ea';
+                        optExp.style.background = 'white';
+                    } else {
+                        optExp.style.border  = '1.5px solid #7BAFC0';
+                        optExp.style.background = '#EDF5F7';
+                        optDash.style.border = '1.5px solid #dde5ea';
+                        optDash.style.background = 'white';
+                    }
+                }
+
+                optDash.onclick = () => selectMode('dashboard');
+                optExp.onclick  = () => selectMode('expand');
+
+                document.getElementById('pdf-confirm-btn').onclick = () => {
+                    overlay.remove();
+                    resolve(selectedMode);
+                };
+                document.getElementById('pdf-cancel-btn').onclick = () => {
+                    overlay.remove();
+                    resolve(null);
+                };
+            });
+        }
+
         async function exportToPDF() {
             const originalBtn = event.target.closest('.icon-btn');
             try {
+                // Mostrar modal de escolha do modo
+                const pdfMode = await showPDFModeDialog();
+                if (pdfMode === null) return; // cancelado
+
                 originalBtn.classList.add('loading');
                 
-                console.log('=== EXPORTAÇÃO PDF INICIADA ===');
+                console.log('=== EXPORTAÇÃO PDF INICIADA — modo:', pdfMode, '===');
                 
                 const contentEl = document.getElementById('content');
                 const sections = contentEl.querySelectorAll('.section');
@@ -3011,8 +3080,26 @@
                     originalBtn.classList.remove('loading');
                     return;
                 }
-                
-                // === ESTRATÉGIA SIMPLES E ROBUSTA ===
+
+                // ── EXPANSÃO DE TABELAS ──
+                // Salvar e remover restrições de altura em todos os elementos com scroll
+                const savedInlineStyles = [];
+                if (pdfMode === 'expand') {
+                    document.querySelectorAll('#content *').forEach(el => {
+                        const s = el.style;
+                        if (s.maxHeight || s.overflowY || s.overflow) {
+                            savedInlineStyles.push({ el, maxHeight: s.maxHeight, overflow: s.overflow, overflowY: s.overflowY });
+                            s.maxHeight = 'none';
+                            s.overflow  = 'visible';
+                            s.overflowY = 'visible';
+                        }
+                    });
+                    // Também via CSS para classes com overflow definido (.outros-list etc.)
+                    const expandStyle = document.createElement('style');
+                    expandStyle.id = 'pdf-expand-style';
+                    expandStyle.textContent = '.outros-list { max-height: none !important; overflow: visible !important; }';
+                    document.head.appendChild(expandStyle);
+                }
                 
                 // Criar cabeçalho simples
                 const headerDiv = document.createElement('div');
@@ -3155,16 +3242,23 @@
                 
                 // Limpeza após 3 segundos
                 setTimeout(() => {
-                    // Remover cabeçalho e dicionário
+                    // Remover cabeçalho
                     document.querySelectorAll('.pdf-header-temp').forEach(el => {
                         if (el.parentNode) el.parentNode.removeChild(el);
                     });
                     
-                    // Remover estilos
+                    // Remover estilos de impressão
                     const style = document.getElementById('pdf-print-style');
-                    if (style && style.parentNode) {
-                        style.parentNode.removeChild(style);
-                    }
+                    if (style && style.parentNode) style.parentNode.removeChild(style);
+
+                    // Restaurar inline styles expandidos
+                    savedInlineStyles.forEach(({ el, maxHeight, overflow, overflowY }) => {
+                        el.style.maxHeight = maxHeight;
+                        el.style.overflow  = overflow;
+                        el.style.overflowY = overflowY;
+                    });
+                    const expandStyle = document.getElementById('pdf-expand-style');
+                    if (expandStyle) expandStyle.remove();
                     
                     console.log('🧹 Limpeza concluída');
                 }, 3000);
