@@ -3094,7 +3094,10 @@ def generate_data_dictionary(vars_meta: List[dict], records: List[dict], meta, o
 
 def render_html_with_working_filters(file_source: str, created_at: str, client_name: str,
                                     vars_meta: List[dict], filters_meta: List[dict], 
-                                    records: List[dict], value_orders: dict, code_to_label: dict) -> str:
+                                    records: List[dict], value_orders: dict, code_to_label: dict,
+                                    output_html_name: str = None,
+                                    user_description: str = '',
+                                    user_period: str = '') -> str:
 
     # JSON strings seguros para JavaScript
     vars_meta_json = json.dumps(vars_meta, ensure_ascii=False)
@@ -3102,6 +3105,70 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
     records_json = json.dumps(records, ensure_ascii=False)
     value_orders_js = json.dumps(value_orders, ensure_ascii=False)
     code_to_label_js = json.dumps(code_to_label, ensure_ascii=False)
+
+    # Ler client_logo e description do dashboard_overlay_config.json (mesma pasta)
+    client_logo = ''
+    description = user_description  # Prioridade máxima: digitado pelo usuário na GUI
+    period = user_period             # Período digitado pelo usuário na GUI
+    import os
+    config_candidates = [
+        'dashboard_overlay_config.json',
+        os.path.join(os.getcwd(), 'dashboard_overlay_config.json'),
+    ]
+    for cfg_path in config_candidates:
+        if os.path.exists(cfg_path):
+            try:
+                with open(cfg_path, 'r', encoding='utf-8') as _f:
+                    _cfg = json.load(_f)
+                client_logo = _cfg.get('client_logo', '')
+                # Buscar description no item de menu
+                import re as _re
+                def _kw(name):
+                    stops = {'de','da','do','dos','das','e','a','o','os','as',
+                             'base','ponderada','html','sav','dashboard','relatorio','resultados'}
+                    return {w for w in _re.findall(r'[a-zA-Z\u00C0-\u00FF]{3,}', name.lower()) if w not in stops}
+                def _find_desc_exact(items, target):
+                    for item in items:
+                        if item.get('file', '') == target:
+                            return item.get('description', '')
+                        if 'children' in item:
+                            r = _find_desc_exact(item['children'], target)
+                            if r is not None: return r
+                    return None
+                def _find_desc_fuzzy(items, sav_base):
+                    sw = _kw(sav_base)
+                    best_s, best_d = 0, None
+                    def _scan(items):
+                        nonlocal best_s, best_d
+                        for item in items:
+                            fw = _kw(item.get('file', ''))
+                            if fw and sw:
+                                s = len(fw & sw) / max(len(fw), len(sw))
+                                if s > best_s:
+                                    best_s, best_d = s, item.get('description', '')
+                            if 'children' in item: _scan(item['children'])
+                    _scan(items)
+                    return best_d if best_s >= 0.4 else None
+                # Prioridade 1: match exato pelo HTML de saída
+                if output_html_name:
+                    _found = _find_desc_exact(_cfg.get('items', []), os.path.basename(output_html_name))
+                    if _found: description = _found
+                # Prioridade 2: match exato pelo nome derivado do SAV
+                if not description:
+                    _html_from_sav = os.path.basename(file_source).replace('.sav','').replace('.SAV','') + '.html'
+                    _found = _find_desc_exact(_cfg.get('items', []), _html_from_sav)
+                    if _found: description = _found
+                # Prioridade 3: fuzzy por palavras-chave do nome do SAV
+                if not description:
+                    _sav_base = os.path.basename(file_source).replace('.sav','').replace('.SAV','')
+                    _found = _find_desc_fuzzy(_cfg.get('items', []), _sav_base)
+                    if _found: description = _found
+                # Fallback: top-level description
+                if not description:
+                    description = _cfg.get('description', '')
+            except:
+                pass
+            break
 
     # Formatação de data para nome do arquivo
     from datetime import datetime
@@ -3252,6 +3319,8 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             border-color: var(--primary);
         }}
 
+        .icon-btn.present {{ color: var(--primary-dark); }}
+        .icon-btn.present:hover {{ background: var(--teal-light); color: var(--primary-dark); }}
         .icon-btn.apply {{ color: #6FAB8A; }}
         .icon-btn.apply:hover {{ background: rgba(111,171,138,0.1); color: #3d8a62; }}
         .icon-btn.clear {{ color: #B83B5C; }}
@@ -3924,15 +3993,19 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 <!-- Filtros gerados dinamicamente -->
             </div>
             <div class="filter-bar-actions">
-                <button class="icon-btn apply" onclick="applyFilters()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
+                <button id="btn-apply" class="icon-btn apply" onclick="applyFilters()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5,8.5 6,12 13.5,4"/></svg>
                     <span class="icon-tooltip">Aplicar filtros</span>
                 </button>
-                <button class="icon-btn clear" onclick="clearFilters()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
+                <button id="btn-clear" class="icon-btn clear" onclick="clearFilters()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3.5" y1="3.5" x2="12.5" y2="12.5"/><line x1="12.5" y1="3.5" x2="3.5" y2="12.5"/></svg>
                     <span class="icon-tooltip">Limpar filtros</span>
                 </button>
-                <div class="icon-btn-sep"></div>
+                <div id="btn-sep" class="icon-btn-sep"></div>
+                <button class="icon-btn present" onclick="startPresentation()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><line x1="8" y1="11.5" x2="8" y2="14"/><line x1="5.5" y1="14" x2="10.5" y2="14"/></svg>
+                    <span class="icon-tooltip">Apresentação</span>
+                </button>
                 <button class="icon-btn excel" onclick="exportAllTables()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="2"/><line x1="6" y1="2" x2="6" y2="14"/><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="10" x2="14" y2="10"/></svg>
                     <span class="icon-tooltip">Exportar Excel</span>
@@ -3956,6 +4029,9 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         const RECORDS = {records_json};
         const FILTERS = FILTERS_META;
         const CHART_LABEL_MAX = {CHART_LABEL_MAX};
+        const DESCRIPTION  = '{description}';
+        const FILE_SOURCE  = '{file_source}';
+        const PERIOD       = '{period}';
     // Função para quebrar rótulos longos em múltiplas linhas
     function wrapLabel(label, maxLen) {{
         if (label === null || label === undefined) return [''];
@@ -4004,13 +4080,21 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
             container.innerHTML = '';
 
             if (FILTERS.length === 0) {{
-                // Opção C: header reduzido só com exportações
+                // Sem filtros: ocultar label, grid e botões de aplicar/limpar
                 const bar = document.getElementById('filtersBar');
                 const lbl = document.getElementById('filtrarLabel');
                 if (bar)  bar.style.height  = '48px';
                 if (lbl)  lbl.style.display = 'none';
                 const inline = document.getElementById('filtersGrid');
                 if (inline) inline.style.display = 'none';
+                const btnApply = document.getElementById('btn-apply');
+                const btnClear = document.getElementById('btn-clear');
+                const btnSep   = document.getElementById('btn-sep');
+                if (btnApply) btnApply.style.display = 'none';
+                if (btnClear) btnClear.style.display = 'none';
+                if (btnSep)   btnSep.style.display   = 'none';
+                const actions = document.querySelector('.filter-bar-actions');
+                if (actions) actions.style.marginLeft = 'auto';
                 return;
             }}
 
@@ -4282,7 +4366,10 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 }}
             }});
             // Retorna cleanup — o chamador deve invocar após restaurar o scroll
-            return () => {{ content.style.minHeight = ''; content.style.overflowAnchor = ''; document.body.style.overflowAnchor = prevAnchor; }};
+            const _cleanup = () => {{ content.style.minHeight = ''; content.style.overflowAnchor = ''; document.body.style.overflowAnchor = prevAnchor; }};
+            // Se modo apresentação ativo, re-renderizar slide atual
+            if (window.__presRenderCurrent) requestAnimationFrame(window.__presRenderCurrent);
+            return _cleanup;
         }}
 
 
@@ -5395,7 +5482,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 
                 // Método 4: Tentar extrair do conteúdo do título (formato comum: "P1. Título" ou "P4_1 - Título")
                 if (!varName) {{
-                    const titleMatch = title.match(/^([A-Za-z0-9_]+)[\\.\\s\\-:\\|]/);
+                    const titleMatch = title.match(/^([A-Za-z0-9_]+)[.\x20\t\x2D:|]/);
                     if (titleMatch) varName = titleMatch[1];
                 }}
                 
@@ -5506,6 +5593,507 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
         function formatNumberBR(num) {{
             // Formatação brasileira: 1.234 (ponto para milhares)
             return num.toLocaleString('pt-BR');
+        }}
+
+        // ===== MODO APRESENTAÇÃO =====
+        function startPresentation() {{
+            const CLIENT_LOGO  = '{client_logo}';
+            const OPINIAO_LOGO = 'https://raw.githubusercontent.com/aag1974/dashboard-ivv/main/logo.png';
+            // DESCRIPTION, FILE_SOURCE e PERIOD são globais
+
+            let sections = Array.from(document.querySelectorAll('.section'));
+            const total = sections.length + 1;
+            let current = 0;
+
+            const overlay = document.createElement('div');
+            overlay.id = 'pres-overlay';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:#EFF2F5;z-index:99999;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+
+            const bar = document.createElement('div');
+            bar.style.cssText = 'background:white;border-bottom:2px solid #7BAFC0;display:flex;align-items:center;padding:0 24px;height:46px;justify-content:space-between;flex-shrink:0;box-shadow:0 1px 4px rgba(0,0,0,0.06);position:relative;z-index:2;';
+            bar.innerHTML =
+                '<div style="display:flex;align-items:center;gap:10px;">' +
+                  '<div style="width:8px;height:8px;border-radius:50%;background:#7BAFC0;flex-shrink:0;"></div>' +
+                  '<span style="font-size:12px;font-weight:600;color:#4d8a9e;letter-spacing:.01em;">Painel de Resultados</span>' +
+                  (DESCRIPTION ? '<span style="color:#ccc;font-size:11px;">|</span><span style="font-size:12px;color:#888;max-width:500px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + DESCRIPTION + '</span>' : '') +
+                '</div>' +
+                '<div style="display:flex;align-items:center;gap:6px;">' +
+                  (FILTERS.length > 0 ? '<button id="pf-btn" style="display:flex;align-items:center;gap:5px;padding:0 10px;height:30px;border-radius:6px;background:#f4f6f8;border:0.5px solid #dde5ea;color:#888;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 4h12M4 8h8M6 12h4"/></svg> Filtrar <span id="pf-badge" style="display:none;background:#7BAFC0;color:white;font-size:10px;font-weight:700;border-radius:10px;padding:1px 6px;line-height:1.4;"></span></button><div style="width:1px;height:20px;background:#eee;margin:0 2px;"></div>' : '') +
+                  '<button id="pp" style="width:30px;height:30px;border-radius:6px;background:#EDF5F7;border:0.5px solid #b8d9e3;color:#4d8a9e;cursor:pointer;font-size:15px;line-height:1;">&#8592;</button>' +
+                  '<span id="pc" style="font-size:12px;color:#999;min-width:42px;text-align:center;">1 / ' + total + '</span>' +
+                  '<button id="pn" style="width:30px;height:30px;border-radius:6px;background:#7BAFC0;border:none;color:white;cursor:pointer;font-size:15px;line-height:1;">&#8594;</button>' +
+                  '<button id="px" style="width:30px;height:30px;border-radius:6px;background:#fdeef2;border:0.5px solid #f5bdc9;color:#B83B5C;cursor:pointer;font-size:13px;margin-left:4px;">&#10005;</button>' +
+                '</div>';
+            overlay.appendChild(bar);
+
+            // ── PAINEL DE FILTROS DROPDOWN ──
+            const filterPanel = document.createElement('div');
+            filterPanel.id = 'pf-panel';
+            filterPanel.style.cssText = 'display:none;background:white;border-bottom:2px solid #7BAFC0;padding:12px 24px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,0.08);z-index:1;';
+
+            if (FILTERS.length > 0) {{
+                const filterRow = document.createElement('div');
+                filterRow.style.cssText = 'display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;';
+
+                // CSS inline para os dropdowns do painel (injetado uma vez)
+                const pfStyle = document.createElement('style');
+                pfStyle.textContent = '.pf-dd-content{{display:none;position:absolute;top:100%;left:0;min-width:200px;background:white;border:0.5px solid #dde5ea;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-height:220px;overflow-y:auto;z-index:9999;margin-top:2px;}}.pf-dd-content.open{{display:block;}}.pf-dd-opt{{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;font-size:13px;color:#333;}}.pf-dd-opt:hover{{background:#f8f9fa;}}.pf-dd-opt.select-all{{background:#f4f6f8;font-weight:600;border-bottom:0.5px solid #eee;}}';
+                document.head.appendChild(pfStyle);
+
+                // Fechar todos os dropdowns ao clicar fora
+                document.addEventListener('click', function pfOutside(e) {{
+                    if (!e.target.closest('.pf-dd-wrap')) {{
+                        document.querySelectorAll('.pf-dd-content.open').forEach(d => d.classList.remove('open'));
+                    }}
+                }});
+
+                FILTERS.forEach(f => {{
+                    const col = document.createElement('div');
+                    col.style.cssText = 'display:flex;flex-direction:column;gap:4px;flex:1;min-width:140px;max-width:240px;';
+
+                    const lbl = document.createElement('div');
+                    lbl.style.cssText = 'font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;';
+                    lbl.textContent = f.title;
+
+                    // Wrapper com posicionamento relativo para o dropdown
+                    const ddWrap = document.createElement('div');
+                    ddWrap.className = 'pf-dd-wrap';
+                    ddWrap.style.cssText = 'position:relative;';
+
+                    // Botão que mostra a seleção atual
+                    const ddBtn = document.createElement('div');
+                    ddBtn.id = 'pf-dd-btn-' + f.name;
+                    ddBtn.style.cssText = 'height:32px;border:0.5px solid #dde5ea;border-radius:6px;font-size:13px;padding:0 28px 0 10px;background:white;color:#999;cursor:pointer;display:flex;align-items:center;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;';
+                    ddBtn.innerHTML = '<span id="pf-dd-txt-' + f.name + '" style="flex:1;overflow:hidden;text-overflow:ellipsis;">Todos</span><span style="position:absolute;right:8px;font-size:9px;color:#bbb;">▼</span>';
+
+                    // Conteúdo do dropdown (checkboxes)
+                    const ddContent = document.createElement('div');
+                    ddContent.className = 'pf-dd-content';
+                    ddContent.id = 'pf-dd-' + f.name;
+
+                    // Opção "Selecionar Todos"
+                    const allOpt = document.createElement('div');
+                    allOpt.className = 'pf-dd-opt select-all';
+                    const allCb = document.createElement('input');
+                    allCb.type = 'checkbox';
+                    allCb.id = 'pf-all-' + f.name;
+                    const allLbl = document.createElement('label');
+                    allLbl.htmlFor = 'pf-all-' + f.name;
+                    allLbl.textContent = 'Selecionar Todos';
+                    allLbl.style.cursor = 'pointer';
+                    allOpt.appendChild(allCb);
+                    allOpt.appendChild(allLbl);
+                    ddContent.appendChild(allOpt);
+
+                    // Opções individuais
+                    const curSel = getSelectedFilters()[f.name] || [];
+                    f.values.forEach(v => {{
+                        const opt = document.createElement('div');
+                        opt.className = 'pf-dd-opt';
+                        opt.dataset.filterName = f.name;
+                        opt.dataset.filterValue = v;
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.value = v;
+                        cb.checked = curSel.includes(v);
+                        const lb = document.createElement('label');
+                        lb.textContent = v;
+                        lb.style.cursor = 'pointer';
+                        opt.appendChild(cb);
+                        opt.appendChild(lb);
+                        ddContent.appendChild(opt);
+                    }});
+
+                    // Atualizar texto do botão
+                    function pfUpdateText() {{
+                        const checks = Array.from(ddContent.querySelectorAll('.pf-dd-opt:not(.select-all) input:checked'));
+                        const total  = ddContent.querySelectorAll('.pf-dd-opt:not(.select-all) input').length;
+                        const txt = document.getElementById('pf-dd-txt-' + f.name);
+                        if (!txt) return;
+                        const allChk = document.getElementById('pf-all-' + f.name);
+                        if (checks.length === 0) {{
+                            txt.textContent = 'Todos';
+                            ddBtn.style.color = '#999';
+                            ddBtn.style.borderColor = '#dde5ea';
+                            if (allChk) allChk.checked = false;
+                        }} else if (checks.length === total) {{
+                            txt.textContent = 'Todos (' + total + ')';
+                            ddBtn.style.color = '#4d8a9e';
+                            ddBtn.style.borderColor = '#7BAFC0';
+                            if (allChk) allChk.checked = true;
+                        }} else {{
+                            txt.textContent = checks.length + ' selecionado' + (checks.length > 1 ? 's' : '');
+                            ddBtn.style.color = '#4d8a9e';
+                            ddBtn.style.borderColor = '#7BAFC0';
+                            if (allChk) allChk.checked = false;
+                        }}
+                    }}
+
+                    // Checkbox "Todos"
+                    allCb.onchange = () => {{
+                        ddContent.querySelectorAll('.pf-dd-opt:not(.select-all) input').forEach(c => c.checked = allCb.checked);
+                        pfUpdateText();
+                    }};
+
+                    // Checkboxes individuais
+                    ddContent.querySelectorAll('.pf-dd-opt:not(.select-all) input').forEach(c => {{
+                        c.onchange = pfUpdateText;
+                    }});
+
+                    // Toggle dropdown
+                    ddBtn.onclick = e => {{
+                        e.stopPropagation();
+                        const isOpen = ddContent.classList.contains('open');
+                        document.querySelectorAll('.pf-dd-content.open').forEach(d => d.classList.remove('open'));
+                        if (!isOpen) ddContent.classList.add('open');
+                    }};
+
+                    pfUpdateText();
+                    ddWrap.appendChild(ddBtn);
+                    ddWrap.appendChild(ddContent);
+                    col.appendChild(lbl);
+                    col.appendChild(ddWrap);
+                    filterRow.appendChild(col);
+                }});
+
+                // Função auxiliar: ler seleção do painel
+                function pfGetSelected() {{
+                    const result = {{}};
+                    FILTERS.forEach(f => {{
+                        const checked = Array.from(
+                            document.querySelectorAll('#pf-dd-' + f.name + ' .pf-dd-opt:not(.select-all) input:checked')
+                        ).map(c => c.value);
+                        result[f.name] = checked;
+                    }});
+                    return result;
+                }}
+
+                // Botões Aplicar / Limpar
+                const btnCol = document.createElement('div');
+                btnCol.style.cssText = 'display:flex;gap:8px;align-items:flex-end;padding-bottom:0;';
+
+                const applyBtn = document.createElement('button');
+                applyBtn.textContent = 'Aplicar';
+                applyBtn.style.cssText = 'height:32px;padding:0 18px;background:#7BAFC0;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;';
+                applyBtn.onclick = () => {{
+                    const pfSel = pfGetSelected();
+                    // Sincronizar com checkboxes do dashboard
+                    FILTERS.forEach(f => {{
+                        const vals = pfSel[f.name] || [];
+                        document.querySelectorAll('.dropdown-content [data-filter-name="' + f.name + '"] input').forEach(i => {{
+                            i.checked = vals.includes(i.value);
+                        }});
+                        updateDropdownText(f.name);
+                    }});
+                    applyFilters();
+                    sections = Array.from(document.querySelectorAll('.section'));
+                    updateFilterBtn();
+                    filterPanel.style.display = 'none';
+                    pfOpen = false;
+                    renderSlide(current);
+                }};
+
+                const clearBtn = document.createElement('button');
+                clearBtn.textContent = 'Limpar';
+                clearBtn.style.cssText = 'height:32px;padding:0 12px;background:white;color:#B83B5C;border:0.5px solid #f5bdc9;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;';
+                clearBtn.onclick = () => {{
+                    // Desmarcar todos os checkboxes do painel
+                    FILTERS.forEach(f => {{
+                        document.querySelectorAll('#pf-dd-' + f.name + ' input').forEach(c => c.checked = false);
+                        const txt = document.getElementById('pf-dd-txt-' + f.name);
+                        const btn = document.getElementById('pf-dd-btn-' + f.name);
+                        if (txt) txt.textContent = 'Todos';
+                        if (btn) {{ btn.style.color = '#999'; btn.style.borderColor = '#dde5ea'; }}
+                    }});
+                    clearFilters();
+                    sections = Array.from(document.querySelectorAll('.section'));
+                    updateFilterBtn();
+                    filterPanel.style.display = 'none';
+                    pfOpen = false;
+                    renderSlide(current);
+                }};
+
+                btnCol.appendChild(applyBtn);
+                btnCol.appendChild(clearBtn);
+                filterRow.appendChild(btnCol);
+                filterPanel.appendChild(filterRow);
+            }}
+            overlay.appendChild(filterPanel);
+
+            // Lógica do botão de filtro
+            let pfOpen = false;
+            function updateFilterBtn() {{
+                const btn = document.getElementById('pf-btn');
+                const badge = document.getElementById('pf-badge');
+                if (!btn) return;
+                const active = getSelectedFilters();
+                const nActive = Object.values(active).filter(v => v.length > 0).length;
+                if (nActive > 0) {{
+                    btn.style.background = '#EDF5F7';
+                    btn.style.borderColor = '#7BAFC0';
+                    btn.style.color = '#4d8a9e';
+                    if (badge) {{ badge.textContent = nActive; badge.style.display = 'inline'; }}
+                }} else {{
+                    btn.style.background = '#f4f6f8';
+                    btn.style.borderColor = '#dde5ea';
+                    btn.style.color = '#888';
+                    if (badge) badge.style.display = 'none';
+                }}
+            }}
+
+            const slideArea = document.createElement('div');
+            slideArea.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 40px 16px;overflow:auto;';
+            overlay.appendChild(slideArea);
+
+            document.body.appendChild(overlay);
+            if (overlay.requestFullscreen) overlay.requestFullscreen().catch(() => {{}});
+
+            function renderSlide(idx) {{
+                current = Math.max(0, Math.min(idx, total - 1));
+                document.getElementById('pc').textContent = (current + 1) + ' / ' + total;
+                slideArea.innerHTML = '';
+
+                if (current === 0) {{
+                    const periodo = getPeriodoColeta();
+                    const card = document.createElement('div');
+                    card.style.cssText = 'background:white;border-radius:12px;width:100%;max-width:860px;overflow:hidden;border:0.5px solid #dde5ea;box-shadow:0 2px 8px rgba(0,0,0,0.06);';
+
+                    // Topo teal
+                    const top = document.createElement('div');
+                    top.style.cssText = 'background:#EDF5F7;padding:40px 48px 32px;';
+                    const _nBruto = '<div><div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Respondentes</div><div style="font-size:22px;color:#444;font-weight:500;">' + RECORDS.length.toLocaleString('pt-BR') + '</div></div>';
+                    const _nPondRaw = Math.round(RECORDS.reduce((s,r) => s + (r.__weight__||1), 0));
+                    const _nPondHtml = Math.abs(_nPondRaw - RECORDS.length) > 0.5
+                        ? '<div><div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">N ponderado</div><div style="font-size:22px;color:#7BAFC0;font-weight:500;">' + _nPondRaw.toLocaleString('pt-BR') + '</div></div>'
+                        : '';
+                    // N filtrado — só aparece quando há filtro ativo
+                    const _filtRecs = getFilteredRecords(null);
+                    const _nFiltRaw = Math.round(_filtRecs.reduce((s,r) => s + (r.__weight__||1), 0));
+                    const _hasFilter = Object.values(getSelectedFilters()).some(v => v.length > 0) || DRILLDOWN.size > 0;
+                    const _nFiltHtml = _hasFilter
+                        ? '<div style="border-left:2px solid #7BAFC0;padding-left:18px;"><div style="font-size:10px;color:#4d8a9e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;font-weight:600;">N filtrado</div><div style="font-size:22px;color:#4d8a9e;font-weight:600;">' + _nFiltRaw.toLocaleString('pt-BR') + '</div></div>'
+                        : '';
+                    top.innerHTML =
+                        '<div style="font-size:11px;font-weight:600;color:#7BAFC0;text-transform:uppercase;letter-spacing:.07em;margin-bottom:12px;">Painel de Resultados</div>' +
+                        '<div style="font-size:18px;color:#444;line-height:1.6;margin-bottom:32px;max-width:560px;font-weight:500;">' + (DESCRIPTION || FILE_SOURCE) + '</div>' +
+                        '<div style="display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start;">' +
+                          _nBruto + _nPondHtml + _nFiltHtml +
+                          '<div><div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Perguntas</div><div style="font-size:22px;color:#444;font-weight:500;">' + VARS_META.length + '</div></div>' +
+                          '<div><div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Período de coleta</div><div style="font-size:22px;color:#444;font-weight:500;">' + periodo + '</div></div>' +
+                        '</div>';
+                    card.appendChild(top);
+
+                    // Rodapé com logos — criados via DOM para evitar problemas de aspas
+                    const foot = document.createElement('div');
+                    foot.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:14px 40px;border-top:0.5px solid rgba(123,175,192,0.2);';
+
+                    const imgClient = document.createElement('img');
+                    imgClient.src = CLIENT_LOGO;
+                    imgClient.style.cssText = 'height:34px;object-fit:contain;';
+                    imgClient.onerror = function() {{ this.style.display = 'none'; }};
+                    foot.appendChild(imgClient);
+
+                    const opDiv = document.createElement('div');
+                    opDiv.style.cssText = 'display:flex;flex-direction:column;align-items:flex-end;gap:4px;';
+                    const opLbl = document.createElement('div');
+                    opLbl.style.cssText = 'font-size:10px;color:#bbb;';
+                    opLbl.textContent = 'Desenvolvido por';
+                    const imgOp = document.createElement('img');
+                    imgOp.src = OPINIAO_LOGO;
+                    imgOp.style.cssText = 'height:22px;opacity:.65;';
+                    imgOp.onerror = function() {{ this.style.display = 'none'; }};
+                    opDiv.appendChild(opLbl);
+                    opDiv.appendChild(imgOp);
+                    foot.appendChild(opDiv);
+
+                    card.appendChild(foot);
+                    slideArea.appendChild(card);
+
+                    // Dots de posição
+                    const dotsBarC = document.createElement('div');
+                    dotsBarC.style.cssText = 'display:flex;gap:5px;margin-top:12px;align-items:center;';
+                    const maxDotsC = Math.min(total, 20);
+                    for (let i = 0; i < maxDotsC; i++) {{
+                        const dot = document.createElement('div');
+                        dot.style.cssText = i === 0
+                            ? 'width:16px;height:6px;border-radius:3px;background:#7BAFC0;cursor:pointer;'
+                            : 'width:6px;height:6px;border-radius:50%;background:#c8d8df;cursor:pointer;';
+                        dot.onclick = () => renderSlide(i);
+                        dotsBarC.appendChild(dot);
+                    }}
+                    slideArea.appendChild(dotsBarC);
+                }} else {{
+                    const src = sections[current - 1];
+                    if (!src) return;
+
+                    const wrap = document.createElement('div');
+                    wrap.style.cssText = 'background:white;border-radius:10px;width:100%;max-width:1100px;max-height:calc(100vh - 110px);overflow-y:auto;overflow-x:hidden;border:0.5px solid #dde5ea;box-shadow:0 2px 8px rgba(0,0,0,0.06);';
+
+                    // Clonar a seção inteira — preserva CSS vars, barras, cores NPS/MR/CSAT
+                    const clone = src.cloneNode(true);
+                    clone.style.cssText = 'border-radius:10px;border:none;box-shadow:none;margin:0;';
+                    clone.querySelectorAll('.ivv-drilldown-hint').forEach(el => el.remove());
+                    clone.querySelectorAll('.ivv-row').forEach(tr => {{ tr.style.cursor = 'default'; }});
+
+                    // ── RE-ATIVAR KEYWORD FILTER (respostas abertas) ──
+                    clone.querySelectorAll('.outros-kw').forEach(chip => {{
+                        chip.onclick = function() {{
+                            const wasActive = chip.classList.contains('active');
+
+                            // Toggle este chip (multi-select OR)
+                            if (wasActive) {{
+                                chip.classList.remove('active');
+                            }} else {{
+                                chip.classList.add('active');
+                            }}
+
+                            // Chips ativos no mesmo grupo
+                            const siblingChips = Array.from(chip.parentElement.querySelectorAll('.outros-kw'));
+                            const activeChips  = siblingChips.filter(c => c.classList.contains('active'));
+
+                            // Normalizar raízes ativas
+                            function normStr(s) {{
+                                return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+                            }}
+                            const activeRoots = activeChips.map(c => normStr(c.dataset.root || c.textContent.replace(/[ ]*([(][0-9]+[)])[ ]*$/, '')));
+
+                            // Determinar os itens a filtrar
+                            let items;
+                            const otrosSub = chip.closest('.outros-sub');
+                            if (otrosSub) {{
+                                // caso: sub-box "Outro" (.outros-item)
+                                items = Array.from(otrosSub.querySelectorAll('.outros-item'));
+                            }} else {{
+                                // caso: pergunta aberta principal (irmão do filterContainer)
+                                const responseList = chip.parentElement.nextElementSibling;
+                                items = responseList ? Array.from(responseList.children) : [];
+                            }}
+
+                            items.forEach(item => {{
+                                if (activeRoots.length === 0) {{
+                                    item.style.display = '';
+                                }} else {{
+                                    const t = normStr(item.textContent);
+                                    item.style.display = activeRoots.some(r => r && t.includes(r)) ? '' : 'none';
+                                }}
+                            }});
+                        }};
+                    }});
+
+                    // ── RE-ATIVAR NS TOGGLE (escalas NPS/CSAT/SAT/CES) ──
+                    clone.querySelectorAll('.ns-toggle-wrap').forEach(nsWrap => {{
+                        nsWrap.style.pointerEvents = '';
+                        nsWrap.onclick = function() {{
+                            const sec = nsWrap.closest('.section');
+                            const varName = sec ? sec.getAttribute('data-var') : null;
+                            if (!varName) return;
+                            const varMeta = VARS_META.find(v => v.name === varName);
+                            if (!varMeta) return;
+                            varMeta._nsIncluded = !varMeta._nsIncluded;
+                            const cleanup = renderAll(); cleanup();
+                            sections = Array.from(document.querySelectorAll('.section'));
+                            renderSlide(current);
+                        }};
+                    }});
+
+                    const foot = document.createElement('div');
+                    foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 20px 12px;border-top:0.5px solid #eef1f4;';
+                    foot.innerHTML = '<span style="font-size:10px;color:#bbb;">' + FILE_SOURCE + '</span>';
+                    const footImg = document.createElement('img');
+                    footImg.src = OPINIAO_LOGO;
+                    footImg.style.cssText = 'height:16px;opacity:.2;';
+                    footImg.onerror = function() {{ this.style.display = 'none'; }};
+                    foot.appendChild(footImg);
+
+                    wrap.appendChild(clone);
+                    wrap.appendChild(foot);
+                    slideArea.appendChild(wrap);
+
+                    // Dots de posição
+                    const dotsBar = document.createElement('div');
+                    dotsBar.style.cssText = 'display:flex;gap:5px;margin-top:12px;align-items:center;';
+                    const maxDots = Math.min(total, 20);
+                    const startDot = total <= maxDots ? 0 : Math.max(0, Math.min(current - Math.floor(maxDots/2), total - maxDots));
+                    for (let i = startDot; i < startDot + maxDots && i < total; i++) {{
+                        const dot = document.createElement('div');
+                        dot.style.cssText = i === current
+                            ? 'width:16px;height:6px;border-radius:3px;background:#7BAFC0;cursor:pointer;transition:all .2s;'
+                            : 'width:6px;height:6px;border-radius:50%;background:#c8d8df;cursor:pointer;transition:all .2s;';
+                        dot.onclick = () => renderSlide(i);
+                        dotsBar.appendChild(dot);
+                    }}
+                    slideArea.appendChild(dotsBar);
+                }}
+            }}
+
+            document.getElementById('pp').onclick = () => renderSlide(current - 1);
+            document.getElementById('pn').onclick = () => renderSlide(current + 1);
+            document.getElementById('px').onclick = closePresentation;
+
+            // Botão filtro toggle
+            const pfBtn = document.getElementById('pf-btn');
+            if (pfBtn) {{
+                pfBtn.onclick = () => {{
+                    pfOpen = !pfOpen;
+                    filterPanel.style.display = pfOpen ? 'block' : 'none';
+                    pfBtn.style.background = pfOpen ? '#7BAFC0' : (document.getElementById('pf-badge') && document.getElementById('pf-badge').style.display !== 'none' ? '#EDF5F7' : '#f4f6f8');
+                    pfBtn.style.color = pfOpen ? 'white' : (document.getElementById('pf-badge') && document.getElementById('pf-badge').style.display !== 'none' ? '#4d8a9e' : '#888');
+                    pfBtn.style.borderColor = pfOpen ? '#7BAFC0' : (document.getElementById('pf-badge') && document.getElementById('pf-badge').style.display !== 'none' ? '#7BAFC0' : '#dde5ea');
+                }};
+                updateFilterBtn();
+            }}
+
+            window.__presKeyHandler = e => {{
+                if (e.key === 'ArrowRight' || e.key === 'ArrowDown') renderSlide(current + 1);
+                else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') renderSlide(current - 1);
+                else if (e.key === 'Escape') closePresentation();
+            }};
+            document.addEventListener('keydown', window.__presKeyHandler);
+            // Hook para renderAll() atualizar o slide atual automaticamente
+            window.__presRenderCurrent = () => renderSlide(current);
+
+            renderSlide(0);
+        }}
+
+        function closePresentation() {{
+            if (document.fullscreenElement) document.exitFullscreen().catch(() => {{}});
+            const ov = document.getElementById('pres-overlay');
+            if (ov) ov.remove();
+            document.removeEventListener('keydown', window.__presKeyHandler);
+            window.__presRenderCurrent = null;
+        }}
+
+        function getPeriodoColeta() {{
+            // Prioridade 1: período digitado pelo usuário na geração
+            if (typeof PERIOD !== 'undefined' && PERIOD && PERIOD.trim()) return PERIOD.trim();
+            try {{
+                const dates = [];
+                // Primeiro tenta campos tipados como data no vars_meta
+                const dateVarNames = new Set(
+                    VARS_META.filter(v => (v.var_type || v.type) === 'date').map(v => v.name)
+                );
+                RECORDS.forEach(r => {{
+                    Object.keys(r).forEach(k => {{
+                        const isDateField = dateVarNames.has(k) ||
+                            k.toLowerCase().includes('submit') ||
+                            k.toLowerCase().includes('date') ||
+                            k.toLowerCase().includes('data');
+                        if (!isDateField) return;
+                        const v = r[k];
+                        if (!v) return;
+                        const d = new Date(v);
+                        // Rejeitar datas inválidas e conversões erradas de epoch SPSS (< 2010)
+                        if (!isNaN(d.getTime()) && d.getFullYear() >= 2010 && d.getFullYear() <= 2100) {{
+                            dates.push(d);
+                        }}
+                    }});
+                }});
+                if (dates.length === 0) return 'Não disponível';
+                const min = new Date(Math.min(...dates));
+                const max = new Date(Math.max(...dates));
+                const fmt = d => d.toLocaleDateString('pt-BR');
+                return min.getTime() === max.getTime() ? fmt(min) : fmt(min) + ' até ' + fmt(max);
+            }} catch(e) {{ return 'Não disponível'; }}
         }}
 
         function getActiveFiltersDescription() {{
@@ -5637,44 +6225,15 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 const activeFilters = getActiveFiltersDescription();
                 
                 // === CALCULAR PERÍODO DE COLETA ===
-                let periodoColeta = 'Não disponível';
-                try {{
-                    const submitDates = [];
-                    RECORDS.forEach(record => {{
-                        // Procurar por campos que possam conter Submit Date
-                        Object.keys(record).forEach(key => {{
-                            if (key.toLowerCase().includes('submit') || 
-                                key.toLowerCase().includes('date') || 
-                                key.toLowerCase().includes('data')) {{
-                                const value = record[key];
-                                if (value && value !== null) {{
-                                    // Tentar converter para data
-                                    const dateValue = new Date(value);
-                                    if (!isNaN(dateValue.getTime()) && dateValue.getFullYear() > 1900) {{
-                                        submitDates.push(dateValue);
-                                    }}
-                                }}
-                            }}
-                        }});
-                    }});
-                    
-                    if (submitDates.length > 0) {{
-                        const minDate = new Date(Math.min(...submitDates));
-                        const maxDate = new Date(Math.max(...submitDates));
-                        
-                        const formatDateBR = (date) => {{
-                            return date.toLocaleDateString('pt-BR');
-                        }};
-                        
-                        if (minDate.getTime() === maxDate.getTime()) {{
-                            periodoColeta = formatDateBR(minDate);
-                        }} else {{
-                            periodoColeta = `${{formatDateBR(minDate)}} até ${{formatDateBR(maxDate)}}`;
-                        }}
-                    }}
-                }} catch (error) {{
-                    console.log('ℹ️ Não foi possível calcular período de coleta:', error);
-                }}
+                const periodoColeta = getPeriodoColeta();
+
+                // N filtrado (quando há filtro ativo)
+                const _pdfFiltRecs = getFilteredRecords(null);
+                const _pdfNFilt = Math.round(_pdfFiltRecs.reduce((s,r) => s + (r.__weight__||1), 0));
+                const _pdfHasFilter = Object.values(getSelectedFilters()).some(v => v.length > 0) || DRILLDOWN.size > 0;
+                const _pdfNFiltLine = _pdfHasFilter
+                    ? `<div style="margin: 12px 0;"><strong>👥 N filtrado:</strong> ${{formatNumberBR(_pdfNFilt)}}</div>`
+                    : '';
                 
                 headerDiv.innerHTML = `
                     <div style="text-align: center; width: 100%;">
@@ -5685,6 +6244,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                             <div style="margin: 12px 0;"><strong>📅 Gerado em:</strong> ${{dateStr}}</div>
                             <div style="margin: 12px 0;"><strong>📅 Período de coleta:</strong> ${{periodoColeta}}</div>
                             <div style="margin: 12px 0;"><strong>👥 Respondentes:</strong> ${{formatNumberBR(totalRecords)}}</div>
+                            ${{_pdfNFiltLine}}
                             <div style="margin: 12px 0;"><strong>📊 Variáveis analisadas:</strong> ${{formatNumberBR(totalVars)}}</div>
                             <div style="margin: 12px 0;"><strong>🔍 Filtros aplicados:</strong> ${{activeFilters.join('; ') || 'Nenhum filtro aplicado'}}</div>
                         </div>
@@ -5766,7 +6326,7 @@ def render_html_with_working_filters(file_source: str, created_at: str, client_n
                 
                 // Sugerir nome do arquivo PDF baseado no título
                 const originalTitle = document.title;
-                const dataAtual = new Date().toLocaleDateString('pt-BR').replace(new RegExp('/', 'g'), '-');
+                const dataAtual = new Date().toLocaleDateString('pt-BR').split('/').join('-');
                 const nomeArquivoLimpo = '{file_source}'.replace('.sav', '').replace('.SAV', '');
                 const tituloPDF = `Relatorio de resultados_${{nomeArquivoLimpo}}_${{dataAtual}}`;
                 document.title = tituloPDF;
@@ -6088,10 +6648,12 @@ def run_gui() -> int:
         selected_vars = []
         selected_filters = []
         selected_weight = None
+        selected_description = ""
+        selected_period = ""
         success = False
         
         def on_generate():
-            nonlocal selected_vars, selected_filters, selected_weight, success
+            nonlocal selected_vars, selected_filters, selected_weight, selected_description, selected_period, success
             
             # Obter seleções
             var_indices = vars_listbox.curselection()
@@ -6116,6 +6678,13 @@ def run_gui() -> int:
             else:
                 selected_weight = None
             
+            # Capturar título/descrição da pesquisa
+            selected_description = desc_entry_var.get().strip()
+            selected_period = period_entry_var.get().strip()
+            
+            # Capturar período de coleta
+            selected_period = period_entry_var.get().strip()
+            
             success = True
             root.quit()
         
@@ -6124,6 +6693,77 @@ def run_gui() -> int:
             success = False
             root.quit()
         
+        # CAMPOS TÍTULO + PERÍODO — lado a lado
+        title_section = tk.Frame(main_frame, bg="#f8f9fa")
+        title_section.pack(fill=tk.X, pady=(20, 0))
+
+        # Coluna esquerda: Título (flex maior)
+        title_field_frame = tk.LabelFrame(title_section,
+            text="📝 Título da Pesquisa",
+            font=("Segoe UI", 11, "bold"),
+            fg="#4d8a9e", bg="#f8f9fa", bd=1, relief="groove")
+        title_field_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, ipady=6, padx=(0, 8))
+
+        tk.Label(title_field_frame,
+            text="Aparece na capa do modo apresentação:",
+            font=("Segoe UI", 9), fg="#888", bg="#f8f9fa").pack(anchor=tk.W, padx=10, pady=(4, 2))
+
+        desc_entry_var = tk.StringVar()
+        # Pré-preencher se encontrar no config
+        try:
+            import json as _json2, re as _re2
+            def _kw2(n):
+                stops = {'de','da','do','e','a','o','base','ponderada','html','sav'}
+                return {w for w in _re2.findall(r'[a-zA-Z\u00C0-\u00FF]{3,}', n.lower()) if w not in stops}
+            for _cp2 in ['dashboard_overlay_config.json',
+                         os.path.join(os.path.dirname(os.path.abspath(in_path)), 'dashboard_overlay_config.json'),
+                         os.path.join(os.getcwd(), 'dashboard_overlay_config.json')]:
+                if os.path.exists(_cp2):
+                    with open(_cp2, encoding='utf-8') as _f2:
+                        _cfg2 = _json2.load(_f2)
+                    _sw2 = _kw2(os.path.basename(in_path))
+                    def _fscan2(items):
+                        for item in items:
+                            fw = _kw2(item.get('file', ''))
+                            if fw and _sw2 and len(fw & _sw2)/max(len(fw),len(_sw2)) >= 0.4:
+                                d = item.get('description','')
+                                if d: return d
+                            if 'children' in item:
+                                r = _fscan2(item['children'])
+                                if r: return r
+                        return ''
+                    _pre2 = _fscan2(_cfg2.get('items', []))
+                    if _pre2:
+                        desc_entry_var.set(_pre2)
+                    break
+        except:
+            pass
+
+        desc_entry = tk.Entry(title_field_frame, textvariable=desc_entry_var,
+            font=("Segoe UI", 11), bg="white", fg="#333",
+            relief="flat", bd=0, highlightthickness=1,
+            highlightbackground="#ccc", highlightcolor="#4d8a9e")
+        desc_entry.pack(fill=tk.X, padx=10, pady=(0, 6), ipady=6)
+
+        # Coluna direita: Período de Coleta (largura fixa)
+        period_field_frame = tk.LabelFrame(title_section,
+            text="📅 Período de Coleta",
+            font=("Segoe UI", 11, "bold"),
+            fg="#4d8a9e", bg="#f8f9fa", bd=1, relief="groove", width=220)
+        period_field_frame.pack(side=tk.LEFT, fill=tk.Y, ipady=6)
+        period_field_frame.pack_propagate(False)
+
+        tk.Label(period_field_frame,
+            text="Ex: mar/2026",
+            font=("Segoe UI", 9), fg="#888", bg="#f8f9fa").pack(anchor=tk.W, padx=10, pady=(4, 2))
+
+        period_entry_var = tk.StringVar()
+        period_entry = tk.Entry(period_field_frame, textvariable=period_entry_var,
+            font=("Segoe UI", 11), bg="white", fg="#333",
+            relief="flat", bd=0, highlightthickness=1,
+            highlightbackground="#ccc", highlightcolor="#4d8a9e")
+        period_entry.pack(fill=tk.X, padx=10, pady=(0, 6), ipady=6)
+
         # BOTÕES FINAIS - Layout moderno
         buttons_section = tk.Frame(main_frame, bg="#f8f9fa")
         buttons_section.pack(fill=tk.X, pady=(30, 0))
@@ -6239,7 +6879,10 @@ def run_gui() -> int:
         print("🎨 Gerando HTML universal...")
         html = render_html_with_working_filters(
             os.path.basename(in_path), created_at, "",
-            vars_meta, filters_meta, records, value_orders, code_to_label
+            vars_meta, filters_meta, records, value_orders, code_to_label,
+            output_html_name=out_path,
+            user_description=selected_description,
+            user_period=selected_period
         )
         
         with open(out_path, "w", encoding="utf-8") as f:
@@ -6321,7 +6964,8 @@ def run_cli() -> int:
 
         html = render_html_with_working_filters(
             os.path.basename(args.input), created_at, args.cliente,
-            vars_meta, filters_meta, records, value_orders, code_to_label
+            vars_meta, filters_meta, records, value_orders, code_to_label,
+            output_html_name=out_path
         )
         
         with open(out_path, "w", encoding="utf-8") as f:

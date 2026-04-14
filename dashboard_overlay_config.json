@@ -1,8 +1,8 @@
 {
-  "title": "Dashboard Master - Header Overlay",
+  "title": "Dashboard Master - Opinião",
   "created": "2025-11-27T09:31:04.218699",
   "architecture": "header_overlay",
-  "description": "Sistema onde header SPSS sobrepõe interface e sidebar navega",
+  "description": "Sistema onde Dashboard SPSS sobrepõe interface e sidebar navega",
   "items": [
     {
       "id": "previdencial",
@@ -122,14 +122,14 @@
           "id": "2026_viver_melhor",
           "title": "2026",
           "file": "2026_viver_melhor.html",
-          "description": "",
+          "description": "Pesquisa de Satisfação Viver Melhor 2026",
           "overlay": true,
           "added": "2026-04-02T13:43:19.715396"
         }
       ]
     }
   ],
-  "updated": "2026-04-09T16:51:10.388850",
+  "updated": "2026-04-14T09:30:53.217930",
   "client_logo": "https://raw.githubusercontent.com/aag1974/dashboard-sistel/main/logo-sistel.png",
   "password": "sistel2026",
   "welcome_title": "Este painel foi desenvolvido pela Opinião Informação Estratégica para a Sistel.",
