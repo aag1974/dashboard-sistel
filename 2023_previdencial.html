@@ -823,7 +823,7 @@
                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="2"/><line x1="6" y1="2" x2="6" y2="14"/><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="10" x2="14" y2="10"/></svg>
                     <span class="icon-tooltip">Exportar Excel</span>
                 </button>
-                <button class="icon-btn pdf" onclick="exportToPDF()" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
+                <button class="icon-btn pdf" onclick="exportToPDF(event)" onmouseenter="this.querySelector('.icon-tooltip').style.display='block'" onmouseleave="this.querySelector('.icon-tooltip').style.display='none'">
                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h6l4 4v8a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z"/><polyline points="10,2 10,6 14,6"/><line x1="5" y1="10" x2="11" y2="10"/><line x1="5" y1="12.5" x2="9" y2="12.5"/></svg>
                     <span class="icon-tooltip">Exportar PDF</span>
                 </button>
@@ -3062,8 +3062,8 @@
             });
         }
 
-        async function exportToPDF() {
-            const originalBtn = event.target.closest('.icon-btn');
+        async function exportToPDF(event) {
+            const originalBtn = event ? event.target.closest('.icon-btn') : document.querySelector('.icon-btn.pdf');
             try {
                 // Mostrar modal de escolha do modo
                 const pdfMode = await showPDFModeDialog();
@@ -3164,10 +3164,10 @@
                 printStyle.id = 'pdf-print-style';
                 printStyle.textContent = `
                     @media print {
-                        body { margin: 0; padding: 15mm; background: white; font-family: Arial, sans-serif; }
+                        body { margin: 0; padding: 12mm 15mm; background: white; font-family: Arial, sans-serif; }
                         .filters-container { display: none !important; }
                         
-                        /* CABEÇALHO - Garantir que apareça centralizado */
+                        /* CABEÇALHO */
                         .pdf-header-temp { 
                             display: flex !important; 
                             visibility: visible !important;
@@ -3180,42 +3180,60 @@
                             justify-content: center !important;
                         }
                         
-                        .section { margin-bottom: 20px; page-break-inside: avoid; }
-                        .section-title { 
-                            font-size: 16px; 
-                            font-weight: bold; 
-                            color: #7BAFC0; 
-                            margin: 20px 0 10px 0; 
-                            border-bottom: 2px solid #7BAFC0; 
-                            padding-bottom: 5px; 
+                        /* SEÇÕES */
+                        .section { margin-bottom: 16px; page-break-inside: avoid; border: 0.5px solid #ddd !important; border-radius: 6px; overflow: hidden; }
+
+                        /* HEADER DA SEÇÃO: remover fundo colorido, mostrar só borda sutil */
+                        .section-header,
+                        .section-header.mr-header,
+                        .section-header.nps-header,
+                        .section-header.open-header {
+                            background: white !important;
+                            border-bottom: 0.5px solid #ddd !important;
+                            padding: 10px 16px !important;
                         }
-                        table { 
-                            width: 100%; 
-                            border-collapse: collapse; 
-                            margin: 10px 0; 
-                            font-size: 11px; 
+
+                        /* TÍTULO: manter cor da variável mas sem underline azul */
+                        .section-title {
+                            font-size: 13px !important;
+                            font-weight: 600 !important;
+                            margin: 0 0 4px 0 !important;
+                            border-bottom: none !important;
+                            padding-bottom: 0 !important;
                         }
-                        table th { 
-                            background: #7BAFC0 !important; 
-                            color: white !important; 
-                            padding: 8px 4px; 
-                            text-align: left; 
-                            border: 1px solid #4d8a9e; 
-                            -webkit-print-color-adjust: exact; 
+                        .section-subtitle { font-size: 11px !important; }
+
+                        /* TABELAS */
+                        .ivv-table { font-size: 11px !important; }
+                        .ivv-table th { 
+                            background: #f1f3f5 !important;
+                            color: #444 !important;
+                            font-weight: 600 !important;
+                            padding: 6px 8px !important;
+                            border-bottom: 1.5px solid #ccc !important;
+                            -webkit-print-color-adjust: exact;
                         }
-                        table td { 
-                            padding: 6px 4px; 
-                            border: 1px solid #ddd; 
-                            text-align: left; 
+                        .ivv-table td { 
+                            padding: 5px 8px !important;
+                            border-bottom: 0.5px solid #eee !important;
+                            font-size: 11px !important;
                         }
-                        table tr:nth-child(even) td { 
-                            background: #f8f9fa !important; 
-                            -webkit-print-color-adjust: exact; 
+                        .ivv-table tr.ivv-total-row td {
+                            background: #f8f9fa !important;
+                            border-top: 1.5px solid #ccc !important;
+                            font-weight: 600 !important;
+                            -webkit-print-color-adjust: exact;
                         }
-                        .chart-container { 
-                            display: none !important;
-                        }
-                        canvas { display: none !important; }
+                        /* Barra de percentual: manter cor mas reduzir opacidade */
+                        .ivv-bar-bg { opacity: 0.25 !important; -webkit-print-color-adjust: exact; }
+
+                        /* MÉTRICAS NPS/CSAT */
+                        .scale-metrics { border-top: 1px solid #ddd !important; }
+                        .scale-metric-row { border-bottom: 0.5px solid #eee !important; }
+
+                        /* OCULTAR */
+                        .chart-container, canvas, .ivv-drilldown-hint { display: none !important; }
+                        .ns-toggle-wrap { display: none !important; }
                     }
                 `;
                 
