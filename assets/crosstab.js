@@ -355,11 +355,82 @@
     }
   }
 
+  var _bannerVars = [];
+
+  function crosstabBannerCandidates() {
+    const out = [];
+    for (const vm of VARS_META) {
+      if (rowKindFromMeta(vm) === 'categorical') out.push({ name: vm.name, title: vm.title || vm.name });
+    }
+    return out;
+  }
+
+  function _renderBannerBar() {
+    const bar = document.getElementById('crosstab-banner');
+    if (!bar) return;
+    const chips = _bannerVars.map(function (n) {
+      const vm = VARS_META.find(function (v) { return v.name === n; });
+      const label = vm ? (vm.title || vm.name) : n;
+      return '<span class="xt-chip" data-name="' + n + '">' + label +
+        ' <span class="xt-chip-x" data-name="' + n + '">✕</span></span>';
+    }).join('');
+    const cands = crosstabBannerCandidates().filter(function (c) { return _bannerVars.indexOf(c.name) === -1; });
+    const opts = ['<option value="">+ adicionar variável…</option>'].concat(
+      cands.map(function (c) { return '<option value="' + c.name + '">' + c.title + '</option>'; })
+    ).join('');
+    bar.innerHTML = '<span class="xt-banner-lbl">Colunas (banner):</span> ' + chips +
+      ' <select id="xt-add-select" class="xt-add">' + opts + '</select>' +
+      '<span class="xt-banner-hint">respeita os filtros e o peso atuais</span>';
+    bar.querySelectorAll('.xt-chip-x').forEach(function (x) {
+      x.addEventListener('click', function () {
+        const nm = x.getAttribute('data-name');
+        _bannerVars = _bannerVars.filter(function (v) { return v !== nm; });
+        _renderBannerBar(); buildCrosstabBook(_bannerVars);
+      });
+    });
+    const sel = document.getElementById('xt-add-select');
+    if (sel) sel.addEventListener('change', function () {
+      if (sel.value && _bannerVars.indexOf(sel.value) === -1) {
+        _bannerVars.push(sel.value);
+        _renderBannerBar(); buildCrosstabBook(_bannerVars);
+      }
+    });
+  }
+
+  function _showView(which) {
+    const vf = document.getElementById('view-frequencias');
+    const vc = document.getElementById('view-crosstab');
+    const tf = document.getElementById('tab-freq');
+    const tc = document.getElementById('tab-cross');
+    if (!vf || !vc) return;
+    const cross = which === 'cross';
+    vf.style.display = cross ? 'none' : '';
+    vc.style.display = cross ? '' : 'none';
+    if (tf) tf.classList.toggle('active', !cross);
+    if (tc) tc.classList.toggle('active', cross);
+    if (cross) buildCrosstabBook(_bannerVars);
+  }
+
+  function initCrosstab() {
+    const tf = document.getElementById('tab-freq');
+    const tc = document.getElementById('tab-cross');
+    if (tf) tf.addEventListener('click', function () { _showView('freq'); });
+    if (tc) tc.addEventListener('click', function () { _showView('cross'); });
+    _renderBannerBar();
+    if (typeof window !== 'undefined') {
+      window.refreshCrosstab = function () {
+        const vc = document.getElementById('view-crosstab');
+        if (vc && vc.style.display !== 'none') buildCrosstabBook(_bannerVars);
+      };
+    }
+  }
+
   const API = {
     effectiveBase, pooledZProportions, zMeans, pValueTwoSided, pLadderLabel,
     getCategories, buildColumns, computeCrosstab,
     applySignificance, MIN_NEFF,
-    rowKindFromMeta, renderCrosstabTable, buildCrosstabBook
+    rowKindFromMeta, renderCrosstabTable, buildCrosstabBook,
+    initCrosstab, crosstabBannerCandidates
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
