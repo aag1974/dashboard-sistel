@@ -365,18 +365,23 @@
     return out;
   }
 
+  function _esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
   function _renderBannerBar() {
     const bar = document.getElementById('crosstab-banner');
     if (!bar) return;
     const chips = _bannerVars.map(function (n) {
       const vm = VARS_META.find(function (v) { return v.name === n; });
       const label = vm ? (vm.title || vm.name) : n;
-      return '<span class="xt-chip" data-name="' + n + '">' + label +
-        ' <span class="xt-chip-x" data-name="' + n + '">✕</span></span>';
+      return '<span class="xt-chip" data-name="' + _esc(n) + '">' + _esc(label) +
+        ' <span class="xt-chip-x" data-name="' + _esc(n) + '">✕</span></span>';
     }).join('');
     const cands = crosstabBannerCandidates().filter(function (c) { return _bannerVars.indexOf(c.name) === -1; });
     const opts = ['<option value="">+ adicionar variável…</option>'].concat(
-      cands.map(function (c) { return '<option value="' + c.name + '">' + c.title + '</option>'; })
+      cands.map(function (c) { return '<option value="' + _esc(c.name) + '">' + _esc(c.title) + '</option>'; })
     ).join('');
     bar.innerHTML = '<span class="xt-banner-lbl">Colunas (banner):</span> ' + chips +
       ' <select id="xt-add-select" class="xt-add">' + opts + '</select>' +
