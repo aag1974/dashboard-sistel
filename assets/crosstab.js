@@ -355,6 +355,42 @@
     }
   }
 
+  function exportCrosstabExcel() {
+    if (typeof XLSX === 'undefined') { alert('XLSX indisponível'); return; }
+    const host = document.getElementById('crosstab-content');
+    const wb = XLSX.utils.book_new();
+    const tables = host.querySelectorAll('table.xt');
+    if (!tables.length) { alert('Nenhuma tabela para exportar'); return; }
+    const ws = XLSX.utils.aoa_to_sheet([['Caderno de cruzamentos']]);
+    let rowPtr = 2;
+    tables.forEach(function (tbl, idx) {
+      const title = tbl.closest('.xt-card').querySelector('.xt-title').textContent;
+      XLSX.utils.sheet_add_aoa(ws, [[title]], { origin: 'A' + rowPtr }); rowPtr++;
+      const aoa = [];
+      tbl.querySelectorAll('tr').forEach(function (tr) {
+        const r = [];
+        tr.querySelectorAll('th,td').forEach(function (c) { r.push(c.textContent.trim()); });
+        aoa.push(r);
+      });
+      XLSX.utils.sheet_add_aoa(ws, aoa, { origin: 'A' + rowPtr });
+      rowPtr += aoa.length + 2;
+    });
+    XLSX.utils.book_append_sheet(wb, ws, 'Cruzamentos');
+    XLSX.writeFile(wb, 'caderno-cruzamentos.xlsx');
+  }
+
+  function exportCrosstabPDF() {
+    const host = document.getElementById('crosstab-content');
+    if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') { alert('PDF indisponível'); return; }
+    html2canvas(host, { scale: 2 }).then(function (canvas) {
+      const img = canvas.toDataURL('image/png');
+      const pdf = new window.jspdf.jsPDF('p', 'mm', 'a4');
+      const w = 210, h = canvas.height * w / canvas.width;
+      pdf.addImage(img, 'PNG', 0, 0, w, h);
+      pdf.save('caderno-cruzamentos.pdf');
+    });
+  }
+
   var _bannerVars = [];
 
   function crosstabBannerCandidates() {
@@ -435,7 +471,8 @@
     getCategories, buildColumns, computeCrosstab,
     applySignificance, MIN_NEFF,
     rowKindFromMeta, renderCrosstabTable, buildCrosstabBook,
-    initCrosstab, crosstabBannerCandidates
+    initCrosstab, crosstabBannerCandidates,
+    exportCrosstabExcel, exportCrosstabPDF
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
