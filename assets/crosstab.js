@@ -93,7 +93,7 @@
     return { wbase: wbase, neff: effectiveBase(weights) };
   }
 
-  function computeCrosstab(rowVar, columns, records) {
+  function computeCrosstab(rowVar, columns, records, valueOrders) {
     const tm = { rowVar: rowVar, columns: columns, rows: [], bases: {} };
 
     if (rowVar.kind === 'numeric') {
@@ -139,7 +139,7 @@
       }
       rowKeys = Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
     } else {
-      rowKeys = getCategories(rowVar.name, records, {}); // ordem por dados; valueOrders aplicado pelo chamador via getCategories no render
+      rowKeys = getCategories(rowVar.name, records, valueOrders || {});
     }
 
     for (const col of columns) {
@@ -227,10 +227,139 @@
     }
   }
 
+  function rowKindFromMeta(vm) {
+    const t = (vm.var_type || vm.type || '').toLowerCase();
+    if (t === 'multiple_response' || vm.type === 'mr') return 'mr';
+    if (t === 'string' || t === 'date') return 'skip';
+    if (t === 'numeric' && (vm.measure || '') === 'scale') return 'numeric';
+    return 'categorical';
+  }
+
+  function _fmtPct(p) { return p === null ? '—' : Math.round(p * 100) + '%'; }
+  function _fmtNum(x) { return x === null ? '—' : x.toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1}); }
+  function _fmtBase(n) { return Math.round(n).toLocaleString('pt-BR'); }
+
+  function _sigSpan(sig) {
+    if (!sig || !sig.label) return '';
+    const arrow = sig.dir === 1 ? '▲' : '▼';
+    const cls = sig.dir === 1 ? 'xt-up' : 'xt-down';
+    return ' <span class="' + cls + '">' + arrow + ' ' + sig.label + '</span>';
+  }
+
+  function renderCrosstabTable(tm) {
+    const card = document.createElement('div');
+    card.className = 'xt-card';
+    const cols = tm.columns;
+    const isNumeric = tm.rowVar.kind === 'numeric';
+
+    // título
+    const h = document.createElement('h2');
+    h.className = 'xt-title';
+    h.textContent = tm.rowVar.title || tm.rowVar.name;
+    card.appendChild(h);
+
+    const table = document.createElement('table');
+    table.className = 'xt';
+
+    // cabeçalho nível 1 (grupos)
+    const groups = [];
+    let i = 0;
+    while (i < cols.length) {
+      const g = cols[i].isTotal ? 'Total' : cols[i].group;
+      let span = 0; const start = i;
+      while (i < cols.length && (cols[i].isTotal ? 'Total' : cols[i].group) === g) { span++; i++; }
+      groups.push({ g: g, span: span, isTotal: cols[start].isTotal });
+    }
+    const thead = document.createElement('thead');
+    const tr1 = document.createElement('tr');
+    tr1.innerHTML = '<th class="xt-rowlabel"></th>';
+    for (const gr of groups) {
+      const th = document.createElement('th');
+      th.className = 'xt-grp' + (gr.isTotal ? ' xt-total' : '');
+      th.colSpan = gr.span; th.textContent = gr.g;
+      tr1.appendChild(th);
+    }
+    thead.appendChild(tr1);
+    const tr2 = document.createElement('tr');
+    tr2.innerHTML = '<th class="xt-rowlabel"></th>';
+    for (const c of cols) {
+      const th = document.createElement('th');
+      th.className = 'xt-cat' + (c.isTotal ? ' xt-total' : '');
+      th.textContent = c.isTotal ? '' : c.label;
+      tr2.appendChild(th);
+    }
+    thead.appendChild(tr2);
+    table.appendChild(thead);
+
+    // corpo
+    const tbody = document.createElement('tbody');
+    for (const row of tm.rows) {
+      const tr = document.createElement('tr');
+      const tdl = document.createElement('td');
+      tdl.className = 'xt-rowlabel'; tdl.textContent = row.label;
+      tr.appendChild(tdl);
+      for (const c of cols) {
+        const cell = row.cells[c.key];
+        const td = document.createElement('td');
+        if (c.isTotal) td.className = 'xt-total-col';
+        const val = isNumeric ? _fmtNum(cell.mean) : _fmtPct(cell.pct);
+        td.innerHTML = val + _sigSpan(cell.sig);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    // base
+    const trb = document.createElement('tr');
+    trb.className = 'xt-base';
+    trb.innerHTML = '<td class="xt-rowlabel">Base (n)</td>';
+    for (const c of cols) {
+      const b = tm.bases[c.key];
+      const td = document.createElement('td');
+      if (c.isTotal) td.className = 'xt-total-col';
+      const small = b.neff < 30 ? ' xt-smallbase' : '';
+      td.innerHTML = '<span class="' + small.trim() + '">' + _fmtBase(b.wbase) + '</span>';
+      trb.appendChild(td);
+    }
+    tbody.appendChild(trb);
+    table.appendChild(tbody);
+    card.appendChild(table);
+
+    // rodapé legenda
+    const foot = document.createElement('div');
+    foot.className = 'xt-legend';
+    const naoSoma = tm.rowVar.kind === 'mr' ? ' · colunas não somam 100% (múltipla resposta)' : '';
+    foot.innerHTML = '<span class="xt-up">▲</span>/<span class="xt-down">▼</span> maior/menor que o grupo · escala: p&lt;0,05 · p&lt;0,01 · p&lt;0,001' + naoSoma;
+    card.appendChild(foot);
+    return card;
+  }
+
+  function buildCrosstabBook(bannerVars) {
+    const host = document.getElementById('crosstab-content');
+    if (!host) return;
+    host.innerHTML = '';
+    if (!bannerVars || bannerVars.length === 0) {
+      host.innerHTML = '<p class="xt-empty">Escolha uma ou mais variáveis para as colunas (banner).</p>';
+      return;
+    }
+    const records = getFilteredRecords(null);
+    const cols = buildColumns(bannerVars, records, (typeof VALUE_ORDERS !== 'undefined' ? VALUE_ORDERS : {}));
+    const bannerSet = new Set(bannerVars);
+    for (const vm of VARS_META) {
+      if (bannerSet.has(vm.name)) continue;
+      const kind = rowKindFromMeta(vm);
+      if (kind === 'skip') continue;
+      const rowVar = { name: vm.name, title: vm.title, kind: kind };
+      const tm = computeCrosstab(rowVar, cols, records, (typeof VALUE_ORDERS !== 'undefined' ? VALUE_ORDERS : {}));
+      applySignificance(tm);
+      host.appendChild(renderCrosstabTable(tm));
+    }
+  }
+
   const API = {
     effectiveBase, pooledZProportions, zMeans, pValueTwoSided, pLadderLabel,
     getCategories, buildColumns, computeCrosstab,
-    applySignificance, MIN_NEFF
+    applySignificance, MIN_NEFF,
+    rowKindFromMeta, renderCrosstabTable, buildCrosstabBook
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
