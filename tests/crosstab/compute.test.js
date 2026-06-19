@@ -57,3 +57,37 @@ test('computeCrosstab numeric: Total = média geral', () => {
   const tk = cols[0].key;
   assert.ok(Math.abs(tm.rows[0].cells[tk].mean - (8+7+5+9+8+7)/6) < 1e-9);
 });
+
+test('applySignificance: Mulheres Ótimo maior que Homens, marca direção +', () => {
+  // base grande para dar significância
+  const big = [];
+  for (let i=0;i<300;i++) big.push({sexo:'Homens',  aval: i<120?'Ótimo':'Bom', __weight__:1});
+  for (let i=0;i<300;i++) big.push({sexo:'Mulheres',aval: i<210?'Ótimo':'Bom', __weight__:1});
+  const cols = C.buildColumns(['sexo'], big, { sexo:['Homens','Mulheres'] });
+  const tm = C.computeCrosstab({name:'aval', kind:'categorical'}, cols, big);
+  C.applySignificance(tm);
+  const mk = cols.find(c=>c.label==='Mulheres').key;
+  const otimo = tm.rows.find(r=>r.label==='Ótimo');
+  assert.strictEqual(otimo.cells[mk].sig.dir, 1);
+  assert.ok(['p<0,05','p<0,01','p<0,001'].includes(otimo.cells[mk].sig.label));
+});
+test('applySignificance: Total nunca marcado', () => {
+  const big = [{sexo:'Homens',aval:'Ótimo',__weight__:1},{sexo:'Mulheres',aval:'Bom',__weight__:1}];
+  const cols = C.buildColumns(['sexo'], big, {});
+  const tm = C.computeCrosstab({name:'aval', kind:'categorical'}, cols, big);
+  C.applySignificance(tm);
+  const tk = cols[0].key;
+  for (const row of tm.rows) assert.strictEqual(row.cells[tk].sig.label, '');
+});
+test('applySignificance: base pequena => sem marcador', () => {
+  const small = [
+    {sexo:'Homens',aval:'Ótimo',__weight__:1},
+    {sexo:'Mulheres',aval:'Bom',__weight__:1},
+  ];
+  const cols = C.buildColumns(['sexo'], small, {});
+  const tm = C.computeCrosstab({name:'aval', kind:'categorical'}, cols, small);
+  C.applySignificance(tm);
+  for (const row of tm.rows) for (const c of cols) {
+    assert.strictEqual(row.cells[c.key].sig.label, '');
+  }
+});

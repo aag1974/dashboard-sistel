@@ -175,9 +175,62 @@
     return tm;
   }
 
+  var MIN_NEFF = 30;
+
+  function _groupColumns(columns) {
+    // mapa bannerVar -> [colunas do grupo] (exclui Total)
+    const m = {};
+    for (const c of columns) {
+      if (c.isTotal) continue;
+      (m[c.bannerVar] = m[c.bannerVar] || []).push(c);
+    }
+    return m;
+  }
+
+  function applySignificance(tm) {
+    const groups = _groupColumns(tm.columns);
+    const isNumeric = tm.rowVar.kind === 'numeric';
+
+    for (const col of tm.columns) {
+      for (const row of tm.rows) {
+        if (col.isTotal) { row.cells[col.key].sig = { dir: 0, label: '' }; continue; }
+        const grp = groups[col.bannerVar] || [];
+        const rest = grp.filter(c => c.key !== col.key);
+        const cell = row.cells[col.key];
+
+        if (rest.length === 0) { cell.sig = { dir: 0, label: '' }; continue; }
+
+        if (isNumeric) {
+          const nC = cell.neff, mC = cell.mean, vC = cell.variance;
+          // resto: combinar média/variância ponderadas pelas bases efetivas
+          let nR = 0, sumW = 0, swx = 0;
+          for (const c of rest) { const cc = row.cells[c.key]; if (cc.mean === null) continue; nR += cc.neff; sumW += cc.neff; swx += cc.neff * cc.mean; }
+          const mR = sumW > 0 ? swx / sumW : null;
+          let vR = 0; if (mR !== null && sumW > 0) { let s=0; for (const c of rest){const cc=row.cells[c.key]; if(cc.mean===null) continue; s += cc.neff * (cc.variance + Math.pow(cc.mean-mR,2));} vR = s/sumW; }
+          if (mC === null || mR === null || nC < MIN_NEFF || nR < MIN_NEFF) { cell.sig = { dir: 0, label: '' }; continue; }
+          const z = zMeans(mC, vC, nC, mR, vR, nR);
+          const p = pValueTwoSided(z);
+          const label = pLadderLabel(p);
+          cell.sig = { dir: label ? (mC > mR ? 1 : -1) : 0, label: label };
+        } else {
+          const pC = cell.pct, nC = cell.neff;
+          let nR = 0, selR = 0;
+          for (const c of rest) { const cc = row.cells[c.key]; const b = tm.bases[c.key]; nR += b.neff; selR += (cc.pct === null ? 0 : cc.pct) * b.neff; }
+          const pR = nR > 0 ? selR / nR : null;
+          if (pC === null || pR === null || nC < MIN_NEFF || nR < MIN_NEFF) { cell.sig = { dir: 0, label: '' }; continue; }
+          const z = pooledZProportions(pC, nC, pR, nR);
+          const p = pValueTwoSided(z);
+          const label = pLadderLabel(p);
+          cell.sig = { dir: label ? (pC > pR ? 1 : -1) : 0, label: label };
+        }
+      }
+    }
+  }
+
   const API = {
     effectiveBase, pooledZProportions, zMeans, pValueTwoSided, pLadderLabel,
-    getCategories, buildColumns, computeCrosstab
+    getCategories, buildColumns, computeCrosstab,
+    applySignificance, MIN_NEFF
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
