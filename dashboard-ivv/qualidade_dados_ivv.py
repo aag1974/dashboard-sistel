@@ -11,12 +11,10 @@ from openpyxl.styles import Font, PatternFill
 
 class IVVQualityControl:
     def __init__(self):
-        # Número de desvios padrão configurável para outliers de AREA
-        self.area_outlier_std = 3
-
-
-        # Número de desvios padrão configurável para outliers de VALOR_MEDIO_M2
-        self.valor_m2_outlier_std = 3
+        # Variação % mínima para ALERTA de VALOR_MEDIO_M2 (mês atual vs anterior)
+        self.valor_m2_variation_threshold = 30
+        # Variação % mínima para classificar como CRÍTICO (provável erro de digitação)
+        self.valor_m2_critical_threshold = 80
         # Definir valores válidos para cada coluna - CORRIGIDO
         self.valid_values = {
             'ORIGEM_RECURSOS': ['Condomínio', 'Cooperativa', 'Finan. Bancário', 'MCMV', 'Próprio'],
@@ -24,7 +22,7 @@ class IVVQualityControl:
             'OFERTA_VENDA': ['OFERTADOS DISPONIVEIS', 'OFERTADOS LANCAMENTOS', 'VENDIDOS', 
                            'VENDIDOS - LANCADOS E VENDIDOS', 'DISTRATO'],
             'BAIRRO': ['Águas Claras', 'Asa Norte', 'Asa Sul', 'Ceilândia', 'Gama', 'Guará', 
-                      'Jardim Botânico', 'Lago Norte', 'Noroeste', 'Park Sul', 'Planaltina', 
+                      'Jardim Botânico', 'Lago Norte', 'Lago Sul', 'Noroeste', 'Park Sul', 'Planaltina', 
                       'Recanto das Emas', 'Samambaia', 'Santa Maria', 'Sobradinho', 
                       'Sobradinho II', 'Sudoeste', 'Taguatinga', 'SIG'],
             'QTD_QUARTOS': ['1', '2', '3', '4+']
@@ -298,7 +296,7 @@ class IVVQualityControl:
 
     
 
-    def _compute_area_outliers(self, df: pd.DataFrame, sheet_name: str, n_std: int = None) -> List[Dict[str, Any]]:
+    def _REMOVED_compute_area_outliers(self, df: pd.DataFrame, sheet_name: str, n_std: int = None) -> List[Dict[str, Any]]:
         """
         Calcula outliers de AREA usando média + N desvios padrão, considerando apenas os dois
         meses mais recentes. Retorna lista de dicionários com detalhes por linha.
@@ -398,7 +396,7 @@ class IVVQualityControl:
 
         return outliers
 
-    def validate_area_outliers_std(self, df: pd.DataFrame, sheet_name: str, n_std: int = None) -> List[str]:
+    def _REMOVED_validate_area_outliers_std(self, df: pd.DataFrame, sheet_name: str, n_std: int = None) -> List[str]:
         """
         Gera mensagens de erro resumidas sobre outliers de AREA para uso no relatório.
         """
@@ -429,7 +427,631 @@ class IVVQualityControl:
             return pd.to_numeric(s, errors='coerce')
         return pd.to_numeric(series, errors='coerce')
 
-    def _compute_valor_m2_outliers(self, df: pd.DataFrame, sheet_name: str, n_std: int = None) -> List[Dict[str, Any]]:
+    def _compute_valor_m2_variation(self, df: pd.DataFrame, sheet_name: str) -> List[Dict[str, Any]]:
+        """
+        Detecta variações suspeitas de VALOR_MEDIO_M2 comparando os dois meses mais recentes,
+        tipologia a tipologia (comparação direta, sem média).
+
+        Chave residencial: EMPREENDIMENTO + QTD_QUARTOS + OFERTA_VENDA + AREA + QTD_GARAGEM
+        Chave comercial:   EMPREENDIMENTO + OFERTA_VENDA + AREA + QTD_GARAGEM
+
+        Só compara tipologias presentes nos dois meses com VALOR_MEDIO_M2 > 0.
+        Retorna lista de dicionários ordenada por |variação%| decrescente.
+        """
+        if 'VALOR_MEDIO_M2' not in df.columns or 'ANO_MES' not in df.columns:
+            return []
+
+        last_months = self.get_last_two_months(df)
+        if len(last_months) < 2:
+            return []
+
+        m_atual, m_ant = last_months[0], last_months[1]
+        df2 = df[df['ANO_MES'].isin([m_atual, m_ant])].copy()
+        df2['VM2'] = self._to_numeric_ptbr(df2['VALOR_MEDIO_M2'])
+
+        if 'QTD_QUARTOS' in df2.columns:
+            df2['QTD_QUARTOS'] = df2['QTD_QUARTOS'].astype(str).str.replace('.0', '', regex=False)
+            keys = ['EMPREENDIMENTO', 'QTD_QUARTOS', 'OFERTA_VENDA', 'AREA', 'QTD_GARAGEM', 'EMPRESA', 'BAIRRO']
+        else:
+            keys = ['EMPREENDIMENTO', 'OFERTA_VENDA', 'AREA', 'QTD_GARAGEM', 'EMPRESA', 'BAIRRO']
+
+        keys = [k for k in keys if k in df2.columns]
+        df_pos = df2[df2['VM2'] > 0].copy()
+
+        results: List[Dict[str, Any]] = []
+
+        for mes, grupo in [(m_ant, 'ANT'), (m_atual, 'ATUAL')]:
+            pass  # só para estruturar — loop real abaixo
+
+        # Indexar cada mês separadamente preservando o índice original
+        ant = df_pos[df_pos['ANO_MES'] == m_ant].set_index(keys)[['VM2']].rename(columns={'VM2': 'VM2_ANT'})
+        atual = df_pos[df_pos['ANO_MES'] == m_atual].set_index(keys)[['VM2']].rename(columns={'VM2': 'VM2_ATUAL'})
+
+        # Preservar índice original para referência de linha
+        ant_idx = df_pos[df_pos['ANO_MES'] == m_ant].copy()
+        ant_idx['_KEY'] = list(zip(*[ant_idx[k] for k in keys]))
+        atual_idx = df_pos[df_pos['ANO_MES'] == m_atual].copy()
+        atual_idx['_KEY'] = list(zip(*[atual_idx[k] for k in keys]))
+
+        ant_line = ant_idx.set_index('_KEY').index
+        atual_line = atual_idx.set_index('_KEY').index
+
+        # Linha original no arquivo por chave
+        ant_line_map = ant_idx.set_index('_KEY')['VM2']  # não usar — usar index do df original
+        ant_orig_idx   = ant_idx.reset_index().groupby('_KEY')['index'].first()
+        atual_orig_idx = atual_idx.reset_index().groupby('_KEY')['index'].first()
+
+        # Join: só tipologias presentes nos dois meses
+        try:
+            merged = ant.join(atual, how='inner')
+        except Exception:
+            return []
+
+        if merged.empty:
+            return []
+
+        var_threshold = getattr(self, 'valor_m2_variation_threshold', 30)
+        crit_threshold = getattr(self, 'valor_m2_critical_threshold', 80)
+
+        for idx_tuple, row in merged.iterrows():
+            val_ant = row['VM2_ANT']
+            val_atual = row['VM2_ATUAL']
+
+            if pd.isna(val_ant) or pd.isna(val_atual) or val_ant == 0:
+                continue
+
+            var_pct = (val_atual - val_ant) / val_ant * 100
+            var_abs = abs(var_pct)
+
+            if var_abs < var_threshold:
+                continue
+
+            nivel = 'CRÍTICO' if var_abs >= crit_threshold else 'ALERTA'
+
+            # Montar dict de campos a partir da chave
+            if not isinstance(idx_tuple, tuple):
+                idx_tuple = (idx_tuple,)
+            campos = dict(zip(keys, idx_tuple))
+
+            # Recuperar índice original (número de linha no arquivo)
+            # +2: índice pandas base-0, linha 1 do Excel = cabeçalho
+            _i_ant   = int(ant_orig_idx.get(idx_tuple,   -1))
+            _i_atual = int(atual_orig_idx.get(idx_tuple, -1))
+            linha_ant   = _i_ant   + 2 if _i_ant   >= 0 else -1
+            linha_atual = _i_atual + 2 if _i_atual >= 0 else -1
+
+            item: Dict[str, Any] = {
+                'nivel': nivel,
+                'var_pct': round(var_pct, 1),
+                'var_abs': round(var_abs, 1),
+                'empresa': campos.get('EMPRESA', ''),
+                'empreendimento': campos.get('EMPREENDIMENTO', ''),
+                'bairro': campos.get('BAIRRO', ''),
+                'qtd_quartos': campos.get('QTD_QUARTOS', None),
+                'area': campos.get('AREA', ''),
+                'qtd_garagem': campos.get('QTD_GARAGEM', ''),
+                'oferta_venda': campos.get('OFERTA_VENDA', ''),
+                'mes_ant': m_ant,
+                'mes_atual': m_atual,
+                'linha_ant': linha_ant,
+                'valor_ant': round(val_ant, 2),
+                'linha_atual': linha_atual,
+                'valor_atual': round(val_atual, 2),
+            }
+            results.append(item)
+
+        results.sort(key=lambda x: (-({'CRÍTICO': 1, 'ALERTA': 0}[x['nivel']]), -x['var_abs']))
+        return results
+
+    def validate_valor_m2_variation(self, df: pd.DataFrame, sheet_name: str) -> List[str]:
+        """Gera mensagens de erro resumidas sobre variações de VALOR_MEDIO_M2."""
+        casos = self._compute_valor_m2_variation(df, sheet_name)
+        if not casos:
+            return []
+
+        criticos = [c for c in casos if c['nivel'] == 'CRÍTICO']
+        alertas  = [c for c in casos if c['nivel'] == 'ALERTA']
+        msgs = []
+
+        if criticos:
+            linhas = [c['linha_atual'] for c in criticos]
+            msgs.append(
+                f"Aba {sheet_name}: {len(criticos)} caso(s) CRÍTICO(S) de VALOR_MEDIO_M2 "
+                f"(variação ≥ {getattr(self,'valor_m2_critical_threshold',80)}% em relação ao mês anterior). "
+                f"Linhas no arquivo: {linhas}"
+            )
+        if alertas:
+            linhas = [c['linha_atual'] for c in alertas]
+            msgs.append(
+                f"Aba {sheet_name}: {len(alertas)} caso(s) de ALERTA de VALOR_MEDIO_M2 "
+                f"(variação entre {getattr(self,'valor_m2_variation_threshold',30)}% e "
+                f"{getattr(self,'valor_m2_critical_threshold',80)-1}% em relação ao mês anterior). "
+                f"Linhas no arquivo: {linhas}"
+            )
+        return msgs
+
+    # ── SITUAÇÃO 1: SALDO NEGATIVO ────────────────────────────────────────────
+
+    def _compute_saldo_negativo(self, df: pd.DataFrame, sheet_name: str) -> List[Dict[str, Any]]:
+        """
+        Detecta tipologias onde OFERTA - VENDA + DISTRATO < 0 nos dois últimos meses.
+        Chave residencial: EMPREENDIMENTO + QTD_QUARTOS + AREA + QTD_GARAGEM + EMPRESA + BAIRRO
+        Chave comercial:   EMPREENDIMENTO + AREA + QTD_GARAGEM + EMPRESA + BAIRRO
+        """
+        required = {'ANO_MES', 'OFERTA_VENDA', 'QUANTIDADE', 'EMPRESA', 'BAIRRO', 'AREA'}
+        if not required.issubset(df.columns):
+            return []
+
+        last_months = self.get_last_two_months(df)
+        if not last_months:
+            return []
+
+        df2 = df[df['ANO_MES'].isin(last_months)].copy()
+        df2['QUANTIDADE'] = pd.to_numeric(df2['QUANTIDADE'], errors='coerce').fillna(0)
+
+        has_quartos = 'QTD_QUARTOS' in df2.columns
+        if has_quartos:
+            df2['QTD_QUARTOS'] = df2['QTD_QUARTOS'].astype(str).str.replace('.0', '', regex=False)
+            grp_keys = ['EMPREENDIMENTO', 'QTD_QUARTOS', 'AREA', 'QTD_GARAGEM', 'EMPRESA', 'BAIRRO']
+        else:
+            grp_keys = ['EMPREENDIMENTO', 'AREA', 'QTD_GARAGEM', 'EMPRESA', 'BAIRRO']
+        grp_keys = [k for k in grp_keys if k in df2.columns]
+
+        results: List[Dict[str, Any]] = []
+
+        for mes in last_months:
+            sub = df2[df2['ANO_MES'] == mes]
+
+            oferta   = sub[sub['OFERTA_VENDA'].isin(['OFERTADOS DISPONIVEIS', 'OFERTADOS LANCAMENTOS'])].groupby(grp_keys)['QUANTIDADE'].sum()
+            venda    = sub[sub['OFERTA_VENDA'].isin(['VENDIDOS', 'VENDIDOS - LANCADOS E VENDIDOS'])].groupby(grp_keys)['QUANTIDADE'].sum()
+            distrato = sub[sub['OFERTA_VENDA'] == 'DISTRATO'].groupby(grp_keys)['QUANTIDADE'].sum()
+
+            chk = pd.DataFrame({'OFERTA': oferta, 'VENDA': venda, 'DISTRATO': distrato}).fillna(0)
+            chk['SALDO'] = chk['OFERTA'] - chk['VENDA'] + chk['DISTRATO']
+            neg = chk[chk['SALDO'] < 0].reset_index()
+
+            # Índice original da linha de venda (mais provável de conter o erro)
+            venda_sub = sub[sub['OFERTA_VENDA'].isin(['VENDIDOS', 'VENDIDOS - LANCADOS E VENDIDOS'])]
+            linha_venda_map = venda_sub.reset_index().groupby(grp_keys)['index'].first()
+
+            for _, row in neg.iterrows():
+                key_tuple = tuple(row[k] for k in grp_keys)
+                linha_ref = int(linha_venda_map.get(key_tuple, -1))
+                if linha_ref >= 0:
+                    linha_ref += 2  # ajuste: índice pandas base-0 + cabeçalho Excel
+
+                item: Dict[str, Any] = {
+                    'mes':          mes,
+                    'mes_fmt':      self.format_ano_mes(mes),
+                    'empresa':      row.get('EMPRESA', ''),
+                    'empreendimento': row.get('EMPREENDIMENTO', ''),
+                    'bairro':       row.get('BAIRRO', ''),
+                    'qtd_quartos':  row.get('QTD_QUARTOS', None),
+                    'area':         row.get('AREA', ''),
+                    'qtd_garagem':  row.get('QTD_GARAGEM', ''),
+                    'oferta':       int(row['OFERTA']),
+                    'venda':        int(row['VENDA']),
+                    'distrato':     int(row['DISTRATO']),
+                    'saldo':        int(row['SALDO']),
+                    'linha_venda':  linha_ref,
+                }
+                results.append(item)
+
+        results.sort(key=lambda x: (x['mes'], x['saldo']))
+        return results
+
+    def create_saldo_worksheet(self, workbook, casos: List[Dict[str, Any]],
+                                sheet_name: str, sheet_type: str, tem_quartos: bool):
+        """Cria worksheet de saldo negativo com formato didático."""
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+
+        ws = workbook.create_sheet(sheet_name)
+
+        FILL_HDR   = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+        FILL_ROW   = PatternFill(start_color='FFE0E0', end_color='FFE0E0', fill_type='solid')
+        FILL_NONE  = PatternFill(start_color='F5F5F5', end_color='F5F5F5', fill_type='solid')
+        F_WHITE    = Font(color='FFFFFF', bold=True, size=10)
+        F_RED      = Font(color='CC0000', bold=True, size=10)
+        F_TITLE    = Font(bold=True, size=13)
+        F_SUB      = Font(italic=True, size=9, color='888888')
+        F_NORMAL   = Font(size=10)
+        CENTER     = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        LEFT       = Alignment(horizontal='left',   vertical='center')
+
+        meses_presentes = sorted({c['mes'] for c in casos}) if casos else []
+        periodo = ' e '.join(self.format_ano_mes(m) for m in meses_presentes) if meses_presentes else 'N/A'
+
+        ws.cell(row=1, column=1, value=f'SALDO NEGATIVO — {sheet_type}   |   Período: {periodo}').font = F_TITLE
+        ws.cell(row=2, column=1,
+                value='Ocorre quando OFERTA - VENDA + DISTRATO < 0 dentro do mesmo mês. '
+                      'Indica que a venda foi descontada no mês errado.').font = F_SUB
+        ws.cell(row=3, column=1, value=f'Total de ocorrências: {len(casos)}').font = Font(size=10, bold=True)
+
+        headers = ['MÊS', 'EMPRESA', 'EMPREENDIMENTO', 'BAIRRO']
+        if tem_quartos:
+            headers.append('QUARTOS')
+        headers += ['ÁREA (m²)', 'GARAGEM', 'OFERTA', 'VENDA', 'DISTRATO', 'SALDO', 'Nº LINHA\n(VENDA)']
+
+        for col_i, h in enumerate(headers, start=1):
+            c = ws.cell(row=5, column=col_i, value=h)
+            c.font = F_WHITE; c.fill = FILL_HDR; c.alignment = CENTER
+
+        if not casos:
+            ws.cell(row=6, column=1,
+                    value='✓ Nenhum saldo negativo encontrado no período.').font = Font(color='006400', bold=True)
+        else:
+            for r_i, caso in enumerate(casos, start=6):
+                fill = FILL_ROW
+
+                col = 1
+                for val, aln in [
+                    (caso['mes_fmt'],         CENTER),
+                    (caso['empresa'],         LEFT),
+                    (caso['empreendimento'],  LEFT),
+                    (caso['bairro'],          LEFT),
+                ]:
+                    c = ws.cell(row=r_i, column=col, value=val)
+                    c.fill = fill; c.alignment = aln; c.font = F_NORMAL
+                    col += 1
+
+                if tem_quartos:
+                    c = ws.cell(row=r_i, column=col, value=caso.get('qtd_quartos', ''))
+                    c.fill = fill; c.alignment = CENTER; c.font = F_NORMAL
+                    col += 1
+
+                for val, aln in [
+                    (caso['area'],     CENTER),
+                    (caso['qtd_garagem'] if isinstance(caso['qtd_garagem'], int)
+                     else (int(caso['qtd_garagem']) if str(caso['qtd_garagem']).replace('.','').isdigit() else caso['qtd_garagem']),
+                     CENTER),
+                    (caso['oferta'],   CENTER),
+                    (caso['venda'],    CENTER),
+                    (caso['distrato'], CENTER),
+                ]:
+                    c = ws.cell(row=r_i, column=col, value=val)
+                    c.fill = fill; c.alignment = aln; c.font = F_NORMAL
+                    col += 1
+
+                # Saldo em vermelho negrito
+                c = ws.cell(row=r_i, column=col, value=caso['saldo'])
+                c.fill = fill; c.alignment = CENTER; c.font = F_RED
+                col += 1
+
+                linha_ref = caso['linha_venda']
+                c = ws.cell(row=r_i, column=col, value=linha_ref if linha_ref >= 0 else 'N/A')
+                c.fill = fill; c.alignment = CENTER; c.font = F_NORMAL
+
+        col_widths = [10, 35, 40, 18]
+        if tem_quartos:
+            col_widths.append(9)
+        col_widths += [10, 9, 9, 9, 10, 9, 12]
+        for i, w in enumerate(col_widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        ws.row_dimensions[5].height = 32
+        ws.freeze_panes = 'A6'
+
+    # ── SITUAÇÃO 2: VALOR VENDA > VALOR OFERTA ────────────────────────────────
+
+    def _compute_valor_ov(self, df: pd.DataFrame, sheet_name: str,
+                          threshold_pct: float = 10.0) -> List[Dict[str, Any]]:
+        """
+        Detecta tipologias onde VM2 de VENDA > VM2 de OFERTA em mais de threshold_pct%,
+        dentro do mesmo mês, nos dois últimos meses.
+        """
+        if 'VALOR_MEDIO_M2' not in df.columns or 'OFERTA_VENDA' not in df.columns:
+            return []
+
+        last_months = self.get_last_two_months(df)
+        if not last_months:
+            return []
+
+        df2 = df[df['ANO_MES'].isin(last_months)].copy()
+        df2['VM2'] = self._to_numeric_ptbr(df2['VALOR_MEDIO_M2'])
+
+        has_quartos = 'QTD_QUARTOS' in df2.columns
+        if has_quartos:
+            df2['QTD_QUARTOS'] = df2['QTD_QUARTOS'].astype(str).str.replace('.0', '', regex=False)
+            grp_keys = ['EMPREENDIMENTO', 'QTD_QUARTOS', 'AREA', 'QTD_GARAGEM', 'EMPRESA', 'BAIRRO']
+        else:
+            grp_keys = ['EMPREENDIMENTO', 'AREA', 'QTD_GARAGEM', 'EMPRESA', 'BAIRRO']
+        grp_keys = [k for k in grp_keys if k in df2.columns]
+
+        df_pos = df2[df2['VM2'] > 0]
+        results: List[Dict[str, Any]] = []
+
+        for mes in last_months:
+            sub = df_pos[df_pos['ANO_MES'] == mes]
+
+            oferta_sub = sub[sub['OFERTA_VENDA'].isin(['OFERTADOS DISPONIVEIS', 'OFERTADOS LANCAMENTOS'])]
+            venda_sub  = sub[sub['OFERTA_VENDA'].isin(['VENDIDOS', 'VENDIDOS - LANCADOS E VENDIDOS'])]
+
+            vm2_oferta = oferta_sub.groupby(grp_keys)['VM2'].mean()
+            vm2_venda  = venda_sub.groupby(grp_keys)['VM2'].mean()
+            linha_venda_map = venda_sub.reset_index().groupby(grp_keys)['index'].first()
+
+            comp = pd.DataFrame({
+                'VM2_OFERTA': vm2_oferta,
+                'VM2_VENDA':  vm2_venda,
+                'LINHA_VENDA': linha_venda_map,
+            }).dropna(subset=['VM2_OFERTA', 'VM2_VENDA'])
+
+            comp['DIFF_PCT'] = (comp['VM2_VENDA'] - comp['VM2_OFERTA']) / comp['VM2_OFERTA'] * 100
+            anom = comp[comp['DIFF_PCT'] > threshold_pct].reset_index()
+
+            for _, row in anom.iterrows():
+                linha_ref = int(row['LINHA_VENDA']) + 2  # ajuste base-0 + cabeçalho
+
+                item: Dict[str, Any] = {
+                    'mes':            mes,
+                    'mes_fmt':        self.format_ano_mes(mes),
+                    'empresa':        row.get('EMPRESA', ''),
+                    'empreendimento': row.get('EMPREENDIMENTO', ''),
+                    'bairro':         row.get('BAIRRO', ''),
+                    'qtd_quartos':    row.get('QTD_QUARTOS', None),
+                    'area':           row.get('AREA', ''),
+                    'qtd_garagem':    row.get('QTD_GARAGEM', ''),
+                    'vm2_oferta':     round(row['VM2_OFERTA'], 2),
+                    'vm2_venda':      round(row['VM2_VENDA'], 2),
+                    'diff_pct':       round(row['DIFF_PCT'], 1),
+                    'linha_venda':    linha_ref,
+                }
+                results.append(item)
+
+        results.sort(key=lambda x: (-x['diff_pct'], x['mes']))
+        return results
+
+    def create_valor_ov_worksheet(self, workbook, casos: List[Dict[str, Any]],
+                                   sheet_name: str, sheet_type: str, tem_quartos: bool):
+        """Cria worksheet de valor venda > valor oferta com formato didático."""
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+
+        ws = workbook.create_sheet(sheet_name)
+
+        FILL_HDR  = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+        FILL_ROW  = PatternFill(start_color='FFF9C4', end_color='FFF9C4', fill_type='solid')
+        F_WHITE   = Font(color='FFFFFF', bold=True, size=10)
+        F_WARN    = Font(color='7D5800', bold=True, size=10)
+        F_TITLE   = Font(bold=True, size=13)
+        F_SUB     = Font(italic=True, size=9, color='888888')
+        F_NORMAL  = Font(size=10)
+        CENTER    = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        LEFT      = Alignment(horizontal='left',   vertical='center')
+
+        meses_presentes = sorted({c['mes'] for c in casos}) if casos else []
+        periodo = ' e '.join(self.format_ano_mes(m) for m in meses_presentes) if meses_presentes else 'N/A'
+
+        ws.cell(row=1, column=1,
+                value=f'VALOR VENDA > VALOR OFERTA — {sheet_type}   |   Período: {periodo}').font = F_TITLE
+        ws.cell(row=2, column=1,
+                value=f'Casos onde o VM² médio de VENDIDOS supera o VM² de OFERTA em mais de 10%. '
+                      f'Em condições normais o valor de oferta é maior que o de venda.').font = F_SUB
+        ws.cell(row=3, column=1, value=f'Total de ocorrências: {len(casos)}').font = Font(size=10, bold=True)
+
+        headers = ['MÊS', 'EMPRESA', 'EMPREENDIMENTO', 'BAIRRO']
+        if tem_quartos:
+            headers.append('QUARTOS')
+        headers += ['ÁREA (m²)', 'GARAGEM', 'VM² OFERTA', 'VM² VENDA', 'DIFERENÇA %', 'Nº LINHA\n(VENDA)']
+
+        for col_i, h in enumerate(headers, start=1):
+            c = ws.cell(row=5, column=col_i, value=h)
+            c.font = F_WHITE; c.fill = FILL_HDR; c.alignment = CENTER
+
+        if not casos:
+            ws.cell(row=6, column=1,
+                    value='✓ Nenhuma ocorrência encontrada no período.').font = Font(color='006400', bold=True)
+        else:
+            for r_i, caso in enumerate(casos, start=6):
+                col = 1
+                for val, aln in [
+                    (caso['mes_fmt'],        CENTER),
+                    (caso['empresa'],        LEFT),
+                    (caso['empreendimento'], LEFT),
+                    (caso['bairro'],         LEFT),
+                ]:
+                    c = ws.cell(row=r_i, column=col, value=val)
+                    c.fill = FILL_ROW; c.alignment = aln; c.font = F_NORMAL
+                    col += 1
+
+                if tem_quartos:
+                    c = ws.cell(row=r_i, column=col, value=caso.get('qtd_quartos', ''))
+                    c.fill = FILL_ROW; c.alignment = CENTER; c.font = F_NORMAL
+                    col += 1
+
+                for val, aln in [
+                    (caso['area'],    CENTER),
+                    (caso['qtd_garagem'] if isinstance(caso['qtd_garagem'], int)
+                     else (int(caso['qtd_garagem']) if str(caso['qtd_garagem']).replace('.','').isdigit() else caso['qtd_garagem']),
+                     CENTER),
+                ]:
+                    c = ws.cell(row=r_i, column=col, value=val)
+                    c.fill = FILL_ROW; c.alignment = aln; c.font = F_NORMAL
+                    col += 1
+
+                # VM² oferta e venda com formato numérico
+                for val in [caso['vm2_oferta'], caso['vm2_venda']]:
+                    c = ws.cell(row=r_i, column=col, value=val)
+                    c.fill = FILL_ROW; c.alignment = CENTER; c.font = F_NORMAL
+                    c.number_format = '#,##0.00'
+                    col += 1
+
+                # Diferença % em destaque
+                c = ws.cell(row=r_i, column=col, value=f"▲ {caso['diff_pct']:.1f}%")
+                c.fill = FILL_ROW; c.alignment = CENTER; c.font = F_WARN
+                col += 1
+
+                linha_ref = caso['linha_venda']
+                c = ws.cell(row=r_i, column=col, value=linha_ref if linha_ref >= 0 else 'N/A')
+                c.fill = FILL_ROW; c.alignment = CENTER; c.font = F_NORMAL
+
+        col_widths = [10, 35, 40, 18]
+        if tem_quartos:
+            col_widths.append(9)
+        col_widths += [10, 9, 14, 14, 13, 12]
+        for i, w in enumerate(col_widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        ws.row_dimensions[5].height = 32
+        ws.freeze_panes = 'A6'
+
+    def create_valor_m2_worksheet(self, workbook, casos: List[Dict[str, Any]],
+                                   sheet_name: str, sheet_type: str, tem_quartos: bool):
+        """
+        Cria worksheet de validação de VALOR_MEDIO_M2 com formato didático:
+        uma linha por caso suspeito, com referência às linhas do arquivo original.
+        """
+        from openpyxl.styles import Font, PatternFill, Alignment
+
+        ws = workbook.create_sheet(sheet_name)
+
+        RED_FONT   = Font(bold=True, color='CC0000', size=11)
+        RED_FILL   = PatternFill(start_color='FFE0E0', end_color='FFE0E0', fill_type='solid')
+        YEL_FONT   = Font(bold=True, color='7D5800', size=11)
+        YEL_FILL   = PatternFill(start_color='FFFACD', end_color='FFFACD', fill_type='solid')
+        HEADER_FONT = Font(bold=True, size=10)
+        TITLE_FONT  = Font(bold=True, size=13)
+        WRAP        = Alignment(vertical='top', wrap_text=True)
+        CENTER      = Alignment(horizontal='center', vertical='top')
+
+        if casos:
+            m_ant   = casos[0]['mes_ant']
+            m_atual = casos[0]['mes_atual']
+            periodo = f"{self.format_ano_mes(m_ant)} → {self.format_ano_mes(m_atual)}"
+            m_ant_fmt   = self.format_ano_mes(m_ant)
+            m_atual_fmt = self.format_ano_mes(m_atual)
+        else:
+            periodo = 'N/A'
+            m_ant_fmt   = 'Mês ant.'
+            m_atual_fmt = 'Mês atual'
+
+        # Linha 1: título
+        ws.cell(row=1, column=1,
+                value=f"VALIDAÇÃO VALOR MÉDIO m² — {sheet_type}   |   Período: {periodo}").font = TITLE_FONT
+
+        # Linha 2: legenda
+        ws.cell(row=2, column=1,
+                value=f"CRÍTICO = variação ≥ {getattr(self,'valor_m2_critical_threshold',80)}%  |  "
+                      f"ALERTA = variação entre {getattr(self,'valor_m2_variation_threshold',30)}% e "
+                      f"{getattr(self,'valor_m2_critical_threshold',80)-1}%").font = Font(italic=True, size=9)
+
+        # Linha 3: contadores
+        criticos = sum(1 for c in casos if c['nivel'] == 'CRÍTICO')
+        alertas  = sum(1 for c in casos if c['nivel'] == 'ALERTA')
+        ws.cell(row=3, column=1,
+                value=f"Total de ocorrências: {len(casos)}   |   Críticos: {criticos}   |   Alertas: {alertas}")
+
+        # Linha 5: cabeçalhos
+        headers = ['NÍVEL', 'EMPRESA', 'EMPREENDIMENTO', 'BAIRRO']
+        if tem_quartos:
+            headers.append('QUARTOS')
+        headers += ['ÁREA (m²)', 'GARAGEM', 'OFERTA_VENDA',
+                    f'Nº LINHA\n({m_ant_fmt})',
+                    f'VALOR m²\n({m_ant_fmt})',
+                    f'Nº LINHA\n({m_atual_fmt})',
+                    f'VALOR m²\n({m_atual_fmt})',
+                    'VARIAÇÃO %']
+
+        for col_idx, h in enumerate(headers, start=1):
+            cell = ws.cell(row=5, column=col_idx, value=h)
+            cell.font = HEADER_FONT
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        # Linhas de dados
+        for row_idx, caso in enumerate(casos, start=6):
+            is_critico = caso['nivel'] == 'CRÍTICO'
+            fill = RED_FILL if is_critico else YEL_FILL
+            font_nivel = RED_FONT if is_critico else YEL_FONT
+            sinal = '▲' if caso['var_pct'] > 0 else '▼'
+
+            col = 1
+            # NÍVEL
+            c = ws.cell(row=row_idx, column=col, value=caso['nivel'])
+            c.font = font_nivel; c.fill = fill; c.alignment = CENTER
+            col += 1
+            # EMPRESA
+            c = ws.cell(row=row_idx, column=col, value=caso['empresa'])
+            c.fill = fill; c.alignment = WRAP
+            col += 1
+            # EMPREENDIMENTO
+            c = ws.cell(row=row_idx, column=col, value=caso['empreendimento'])
+            c.fill = fill; c.alignment = WRAP
+            col += 1
+            # BAIRRO
+            c = ws.cell(row=row_idx, column=col, value=caso['bairro'])
+            c.fill = fill; c.alignment = WRAP
+            col += 1
+            # QUARTOS (só residencial)
+            if tem_quartos:
+                c = ws.cell(row=row_idx, column=col, value=caso.get('qtd_quartos', ''))
+                c.fill = fill; c.alignment = CENTER
+                col += 1
+            # ÁREA
+            c = ws.cell(row=row_idx, column=col, value=caso['area'])
+            c.fill = fill; c.alignment = CENTER
+            col += 1
+            # GARAGEM
+            garagem_val = caso['qtd_garagem']
+            try:
+                garagem_val = int(garagem_val)
+            except (ValueError, TypeError):
+                pass
+            c = ws.cell(row=row_idx, column=col, value=garagem_val)
+            c.fill = fill; c.alignment = CENTER
+            col += 1
+            # OFERTA_VENDA
+            c = ws.cell(row=row_idx, column=col, value=caso['oferta_venda'])
+            c.fill = fill; c.alignment = WRAP
+            col += 1
+            # Nº LINHA mês anterior
+            linha_ant = caso['linha_ant']
+            c = ws.cell(row=row_idx, column=col, value=linha_ant if linha_ant >= 0 else 'N/A')
+            c.fill = fill; c.alignment = CENTER
+            col += 1
+            # VALOR m² mês anterior
+            c = ws.cell(row=row_idx, column=col, value=caso['valor_ant'])
+            c.fill = fill; c.alignment = CENTER
+            c.number_format = '#,##0.00'
+            col += 1
+            # Nº LINHA mês atual
+            linha_atual = caso['linha_atual']
+            c = ws.cell(row=row_idx, column=col, value=linha_atual if linha_atual >= 0 else 'N/A')
+            c.fill = fill; c.alignment = CENTER
+            col += 1
+            # VALOR m² mês atual
+            c = ws.cell(row=row_idx, column=col, value=caso['valor_atual'])
+            c.fill = fill; c.alignment = CENTER
+            c.number_format = '#,##0.00'
+            col += 1
+            # VARIAÇÃO %
+            c = ws.cell(row=row_idx, column=col,
+                        value=f"{sinal} {abs(caso['var_pct']):.1f}%")
+            c.font = font_nivel; c.fill = fill; c.alignment = CENTER
+
+        # Mensagem quando não há casos
+        if not casos:
+            ws.cell(row=6, column=1,
+                    value='✓ Nenhuma variação suspeita encontrada entre os dois últimos meses.').font = Font(color='006400', bold=True)
+
+        # Larguras de coluna
+        col_widths = [12, 35, 40, 18]
+        if tem_quartos:
+            col_widths.append(9)
+        col_widths += [10, 9, 25, 14, 16, 14, 16, 13]
+
+        for i, width in enumerate(col_widths, start=1):
+            ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = width
+
+        # Altura do cabeçalho
+        ws.row_dimensions[5].height = 32
+        ws.freeze_panes = 'A6'
+
+    def _compute_valor_m2_outliers(self, *args, **kwargs):
+        """Método removido — use _compute_valor_m2_variation."""
+        return []
+
+    def validate_valor_m2_outliers_std(self, *args, **kwargs):
+        """Método removido — use validate_valor_m2_variation."""
+        return []
         """
         Calcula outliers de VALOR_MEDIO_M2 usando média + N desvios padrão, considerando apenas os dois
         meses mais recentes. Retorna lista de dicionários com detalhes por linha.
@@ -1154,139 +1776,121 @@ class IVVQualityControl:
 
     def create_launches_worksheet_with_empreendimentos(self, workbook, launches_data, sheet_name, sheet_type):
         """
-        Cria worksheet de lançamentos exibindo APENAS o bloco:
-        - LANÇAMENTOS POR EMPREENDIMENTO
-        ORDENADO por data do primeiro lançamento (crescente).
+        Cria worksheet de lançamentos: uma linha por lançamento, com cor por empresa.
+        Colunas: MÊS | EMPREENDIMENTO | EMPRESA | BAIRRO | UNIDADES
         """
-
         try:
-            from openpyxl.styles import Font, Alignment
-
-            def mes_to_yyyymm(mes_key) -> int:
-                """
-                Converte chaves de mês em inteiro YYYYMM para ordenação robusta.
-                Aceita: 202511, "202511", "2025-11".
-                """
-                if mes_key is None:
-                    return 0
-                s = str(mes_key).strip()
-                if s == "":
-                    return 0
-                s = s.replace("-", "")
-                s = "".join(ch for ch in s if ch.isdigit())
-                if len(s) >= 6:
-                    s = s[:6]
-                try:
-                    return int(s)
-                except Exception:
-                    return 0
-
-            def yyyymm_to_fmt(yyyymm: int) -> str:
-                try:
-                    s = str(int(yyyymm))
-                    return f"{s[:4]}-{s[4:6]}"
-                except Exception:
-                    return "N/A"
-
-            def first_month_of_emp(emp_data: dict) -> int:
-                por_mes = emp_data.get('por_mes', {}) or {}
-                if not por_mes:
-                    return 0
-                return min(mes_to_yyyymm(k) for k in por_mes.keys())
+            from openpyxl.styles import Font, PatternFill, Alignment
+            from openpyxl.utils import get_column_letter
 
             ws = workbook.create_sheet(sheet_name)
 
-            title_font = Font(bold=True, size=14)
-            section_font = Font(bold=True, size=12)
-            header_font = Font(bold=True, size=10)
+            # Paleta de cores pastel por empresa (10 tons)
+            PALETA = [
+                'DDEEFF', 'D5F5E3', 'FFE8CC', 'FCE4EC', 'EDE7F6',
+                'FFF9C4', 'E0F2F1', 'F3E5F5', 'E8EAF6', 'FBE9E7',
+            ]
+            FILL_HDR   = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+            FILL_TOTAL = PatternFill(start_color='2E75B6', end_color='2E75B6', fill_type='solid')
+            F_WHITE    = Font(color='FFFFFF', bold=True, size=10)
+            F_TITLE    = Font(bold=True, size=13)
+            F_SUB      = Font(bold=True, size=11)
+            F_NOTE     = Font(italic=True, size=9, color='888888')
+            F_NORMAL   = Font(size=10)
+            CENTER     = Alignment(horizontal='center', vertical='center')
+            LEFT       = Alignment(horizontal='left',   vertical='center')
 
-            row = 1
-
-            # Título
-            ws.cell(row=row, column=1, value=f"ANÁLISE DE LANÇAMENTOS - {sheet_type}").font = title_font
-            row += 2
-
-            # Total
-            total_launches = launches_data.get('total_launches', 0)
-            ws.cell(row=row, column=1, value=f"TOTAL DE LANÇAMENTOS: {total_launches} unidades").font = section_font
-            row += 2
-
-            # ÚNICO BLOCO
-            ws.cell(row=row, column=1, value="LANÇAMENTOS POR EMPREENDIMENTO (ordenado por data):").font = section_font
-            row += 1
-
+            total_launches    = launches_data.get('total_launches', 0)
             by_empreendimento = launches_data.get('by_empreendimento', {}) or {}
 
-            # Cabeçalho
-            ws.cell(row=row, column=1, value="Primeiro Mês").font = header_font
-            ws.cell(row=row, column=2, value="Empreendimento").font = header_font
-            ws.cell(row=row, column=3, value="Total Unidades").font = header_font
-            ws.cell(row=row, column=4, value="Empresa(s)").font = header_font
-            ws.cell(row=row, column=5, value="Bairro(s)").font = header_font
-            ws.cell(row=row, column=6, value="Detalhes por Mês").font = header_font
-            row += 1
+            # ── Título ────────────────────────────────────────────────────────
+            ws.cell(row=1, column=1, value=f'LANÇAMENTOS — {sheet_type}').font = F_TITLE
+            ws.cell(row=2, column=1, value=f'Total: {total_launches} unidades lançadas').font = F_SUB
+            ws.cell(row=3, column=1,
+                    value='Contabiliza apenas o primeiro mês de lançamento de cada empreendimento').font = F_NOTE
+
+            # ── Cabeçalhos ────────────────────────────────────────────────────
+            headers = ['MÊS', 'EMPREENDIMENTO', 'EMPRESA', 'BAIRRO', 'UNIDADES']
+            for col_i, h in enumerate(headers, start=1):
+                c = ws.cell(row=5, column=col_i, value=h)
+                c.font = F_WHITE; c.fill = FILL_HDR; c.alignment = CENTER
 
             if not by_empreendimento:
-                ws.cell(row=row, column=1, value="Nenhum empreendimento encontrado")
-                row += 1
-            else:
-                # Ordenar empreendimentos por data (primeiro mês) crescente; desempate por nome
-                ordered_items = sorted(
-                    by_empreendimento.items(),
-                    key=lambda kv: (first_month_of_emp(kv[1]), str(kv[0]).upper().strip())
-                )
+                ws.cell(row=6, column=1,
+                        value='Nenhum lançamento encontrado no período.').font = Font(italic=True)
+                return
 
-                for empreendimento, data in ordered_items:
-                    por_mes = data.get('por_mes', {}) or {}
-                    primeiro_yyyymm = first_month_of_emp(data)
-                    primeiro_fmt = yyyymm_to_fmt(primeiro_yyyymm)
+            # ── Achatar dados: 1 linha por (empreendimento, mês) ─────────────
+            rows = []
+            for emp_name, emp_data in by_empreendimento.items():
+                for mes_key, mes_data in emp_data.get('por_mes', {}).items():
+                    empresa_str = ', '.join(mes_data.get('empresas', emp_data.get('empresas', [])))
+                    bairro_str  = ', '.join(mes_data.get('bairros',  emp_data.get('bairros',  [])))
+                    rows.append({
+                        'mes':            mes_key,
+                        'empreendimento': emp_name,
+                        'empresa':        empresa_str,
+                        'bairro':         bairro_str,
+                        'unidades':       mes_data.get('quantidade', 0),
+                    })
 
-                    ws.cell(row=row, column=1, value=primeiro_fmt)
-                    ws.cell(row=row, column=2, value=str(empreendimento))
-                    ws.cell(row=row, column=3, value=f"{data.get('total_quantidade', 0)} unidades")
-                    ws.cell(row=row, column=4, value=', '.join(data.get('empresas', [])))
-                    ws.cell(row=row, column=5, value=', '.join(data.get('bairros', [])))
+            def _mes_int(mes_key):
+                s = ''.join(ch for ch in str(mes_key) if ch.isdigit())[:6]
+                try: return int(s)
+                except: return 0
 
-                    # Detalhes por mês ORDENADOS crescente
-                    mes_keys_sorted = sorted(por_mes.keys(), key=mes_to_yyyymm)
+            rows.sort(key=lambda r: (_mes_int(r['mes']), r['empresa'], r['empreendimento']))
 
-                    detalhes_mes = []
-                    for mes_key in mes_keys_sorted:
-                        mes_data = por_mes.get(mes_key, {}) or {}
-                        qtd = mes_data.get('quantidade', 0)
-                        empresas_mes = ', '.join(mes_data.get('empresas', []))
+            # ── Cor por empresa ───────────────────────────────────────────────
+            empresas_ord = []
+            for r in rows:
+                if r['empresa'] not in empresas_ord:
+                    empresas_ord.append(r['empresa'])
+            cor_emp = {
+                emp: PatternFill(start_color=PALETA[i % len(PALETA)],
+                                 end_color=PALETA[i % len(PALETA)],
+                                 fill_type='solid')
+                for i, emp in enumerate(empresas_ord)
+            }
 
-                        yyyymm = mes_to_yyyymm(mes_key)
-                        mes_fmt = yyyymm_to_fmt(yyyymm)
+            # ── Escrita das linhas ────────────────────────────────────────────
+            for r_i, r in enumerate(rows, start=6):
+                fill = cor_emp.get(r['empresa'],
+                                   PatternFill(start_color='FFFFFF', end_color='FFFFFF', fill_type='solid'))
 
-                        if empresas_mes:
-                            detalhe = f"{mes_fmt}: {qtd} un. ({empresas_mes})"
-                        else:
-                            detalhe = f"{mes_fmt}: {qtd} un."
-                        detalhes_mes.append(detalhe)
+                mes_fmt = r['mes']
+                s = ''.join(ch for ch in str(mes_fmt) if ch.isdigit())
+                if len(s) == 6:
+                    mes_fmt = f"{s[:4]}-{s[4:6]}"
 
-                    ws.cell(row=row, column=6, value='; '.join(detalhes_mes))
-                    row += 1
+                valores = [mes_fmt, r['empreendimento'], r['empresa'], r['bairro'], r['unidades']]
+                aligns  = [CENTER, LEFT, LEFT, LEFT, CENTER]
 
-            # Formatação
-            for r in range(1, row):
-                for c in range(1, 7):
-                    ws.cell(row=r, column=c).alignment = Alignment(vertical='top', wrap_text=True)
+                for col_i, (val, aln) in enumerate(zip(valores, aligns), start=1):
+                    c = ws.cell(row=r_i, column=col_i, value=val)
+                    c.fill = fill; c.alignment = aln; c.font = F_NORMAL
 
-            # Larguras
-            ws.column_dimensions['A'].width = 14  # Primeiro Mês
-            ws.column_dimensions['B'].width = 40  # Empreendimento
-            ws.column_dimensions['C'].width = 18  # Total
-            ws.column_dimensions['D'].width = 35  # Empresas
-            ws.column_dimensions['E'].width = 25  # Bairros
-            ws.column_dimensions['F'].width = 90  # Detalhes
+            # ── Linha de total ────────────────────────────────────────────────
+            tot_row = 6 + len(rows)
+            ws.cell(row=tot_row, column=1, value='TOTAL').font = F_WHITE
+            ws.cell(row=tot_row, column=1).fill = FILL_TOTAL
+            ws.cell(row=tot_row, column=1).alignment = CENTER
+            ws.cell(row=tot_row, column=5, value=total_launches).font = F_WHITE
+            ws.cell(row=tot_row, column=5).fill = FILL_TOTAL
+            ws.cell(row=tot_row, column=5).alignment = CENTER
+            for col_i in [2, 3, 4]:
+                ws.cell(row=tot_row, column=col_i).fill = FILL_TOTAL
 
-            # Congelar cabeçalho (ajuste conforme a altura do topo)
-            ws.freeze_panes = "A6"
+            # ── Larguras e ajustes ────────────────────────────────────────────
+            for col_i, w in enumerate([10, 45, 45, 18, 10], start=1):
+                ws.column_dimensions[get_column_letter(col_i)].width = w
+            ws.row_dimensions[5].height = 22
+            ws.freeze_panes = 'A6'
 
         except Exception as e:
             print(f"Erro ao criar worksheet de lançamentos: {e}")
-
+            import traceback
+            traceback.print_exc()
 
     def create_summary_tables_excel(self, file_path: str, df_residencial: pd.DataFrame, 
                                   df_comercial: pd.DataFrame, residencial_name: str, 
@@ -1365,143 +1969,47 @@ class IVVQualityControl:
                 print("AVISO: Tabela comercial está vazia")
             
 
-            # Criar abas de outliers de AREA (Residencial e Comercial) para os dois últimos meses
-            outliers_res = self._compute_area_outliers(df_residencial, residencial_name)
-            if outliers_res:
-                print("Criando aba de outliers de AREA residencial...")
-                ws_area_res = wb.create_sheet('Area_Residencial')
-                ws_area_res['A1'] = "OUTLIERS DE AREA - RESIDENCIAL (dois últimos meses)"
-                ws_area_res['A1'].font = Font(bold=True, size=14)
+            # Criar abas de validação de VALOR_MEDIO_M2 (variação mês a mês)
+            casos_valor_res = self._compute_valor_m2_variation(df_residencial, residencial_name)
+            print(f"Criando aba ValorM2_Residencial ({len(casos_valor_res)} caso(s))...")
+            self.create_valor_m2_worksheet(wb, casos_valor_res, 'ValorM2_Residencial',
+                                           'RESIDENCIAL', tem_quartos=True)
 
-                headers = [
-                    "Linha (índice)", "Empresa", "Empreendimento", "Bairro", "ANO_MES",
-                    "Oferta/Venda", "Quartos", "Área Declarada", "Limite Aceitável",
-                    "Média", "Desvio Padrão", "Valor Médio m²"
-                ]
-                for col_idx, h in enumerate(headers, start=1):
-                    cell = ws_area_res.cell(row=3, column=col_idx, value=h)
-                    cell.font = Font(bold=True)
+            casos_valor_com = self._compute_valor_m2_variation(df_comercial, comercial_name)
+            print(f"Criando aba ValorM2_Comercial ({len(casos_valor_com)} caso(s))...")
+            self.create_valor_m2_worksheet(wb, casos_valor_com, 'ValorM2_Comercial',
+                                           'COMERCIAL', tem_quartos=False)
 
-                row_idx = 4
-                for item in outliers_res:
-                    ws_area_res.cell(row=row_idx, column=1, value=item['index'])
-                    ws_area_res.cell(row=row_idx, column=2, value=item['empresa'])
-                    ws_area_res.cell(row=row_idx, column=3, value=item['empreendimento'])
-                    ws_area_res.cell(row=row_idx, column=4, value=item['bairro'])
-                    ws_area_res.cell(row=row_idx, column=5, value=item['ano_mes'])
-                    ws_area_res.cell(row=row_idx, column=6, value=item['oferta_venda'])
-                    ws_area_res.cell(row=row_idx, column=7, value=item['quartos'])
-                    ws_area_res.cell(row=row_idx, column=8, value=item['area_declarada'])
-                    ws_area_res.cell(row=row_idx, column=9, value=item['limite_area'])
-                    ws_area_res.cell(row=row_idx, column=10, value=item['media'])
-                    ws_area_res.cell(row=row_idx, column=11, value=item['desvio_padrao'])
-                    ws_area_res.cell(row=row_idx, column=12, value=item['valor_m2'])
-                    row_idx += 1
+            # Criar abas de saldo negativo
+            casos_saldo_res = self._compute_saldo_negativo(df_residencial, residencial_name)
+            print(f"Criando aba Saldo_Residencial ({len(casos_saldo_res)} caso(s))...")
+            self.create_saldo_worksheet(wb, casos_saldo_res, 'Saldo_Residencial',
+                                        'RESIDENCIAL', tem_quartos=True)
 
-            outliers_com = self._compute_area_outliers(df_comercial, comercial_name)
-            if outliers_com:
-                print("Criando aba de outliers de AREA comercial...")
-                ws_area_com = wb.create_sheet('Area_Comercial')
-                ws_area_com['A1'] = "OUTLIERS DE AREA - COMERCIAL (dois últimos meses)"
-                ws_area_com['A1'].font = Font(bold=True, size=14)
+            casos_saldo_com = self._compute_saldo_negativo(df_comercial, comercial_name)
+            print(f"Criando aba Saldo_Comercial ({len(casos_saldo_com)} caso(s))...")
+            self.create_saldo_worksheet(wb, casos_saldo_com, 'Saldo_Comercial',
+                                        'COMERCIAL', tem_quartos=False)
 
-                headers = [
-                    "Linha (índice)", "Empresa", "Empreendimento", "Bairro", "ANO_MES",
-                    "Oferta/Venda", "Área Declarada", "Limite Aceitável",
-                    "Média", "Desvio Padrão", "Valor Médio m²"
-                ]
-                for col_idx, h in enumerate(headers, start=1):
-                    cell = ws_area_com.cell(row=3, column=col_idx, value=h)
-                    cell.font = Font(bold=True)
+            # Criar abas de valor venda > valor oferta
+            casos_ov_res = self._compute_valor_ov(df_residencial, residencial_name)
+            print(f"Criando aba ValorOV_Residencial ({len(casos_ov_res)} caso(s))...")
+            self.create_valor_ov_worksheet(wb, casos_ov_res, 'ValorOV_Residencial',
+                                           'RESIDENCIAL', tem_quartos=True)
 
-                row_idx = 4
-                for item in outliers_com:
-                    ws_area_com.cell(row=row_idx, column=1, value=item['index'])
-                    ws_area_com.cell(row=row_idx, column=2, value=item['empresa'])
-                    ws_area_com.cell(row=row_idx, column=3, value=item['empreendimento'])
-                    ws_area_com.cell(row=row_idx, column=4, value=item['bairro'])
-                    ws_area_com.cell(row=row_idx, column=5, value=item['ano_mes'])
-                    ws_area_res.cell(row=row_idx, column=6, value=item['oferta_venda'])
-                    ws_area_com.cell(row=row_idx, column=7, value=item['area_declarada'])
-                    ws_area_com.cell(row=row_idx, column=8, value=item['limite_area'])
-                    ws_area_com.cell(row=row_idx, column=9, value=item['media'])
-                    ws_area_com.cell(row=row_idx, column=10, value=item['desvio_padrao'])
-                    ws_area_com.cell(row=row_idx, column=11, value=item['valor_m2'])
-                    row_idx += 1
+            casos_ov_com = self._compute_valor_ov(df_comercial, comercial_name)
+            print(f"Criando aba ValorOV_Comercial ({len(casos_ov_com)} caso(s))...")
+            self.create_valor_ov_worksheet(wb, casos_ov_com, 'ValorOV_Comercial',
+                                           'COMERCIAL', tem_quartos=False)
 
 
-            # Criar abas de outliers de VALOR_MEDIO_M2 (Residencial e Comercial) para os dois últimos meses
-            outliers_valor_res = self._compute_valor_m2_outliers(df_residencial, residencial_name)
-            if outliers_valor_res:
-                print("Criando aba de outliers de VALOR_MEDIO_M2 residencial...")
-                ws_valor_res = wb.create_sheet('ValorM2_Residencial')
-                ws_valor_res['A1'] = "OUTLIERS DE VALOR MÉDIO M² - RESIDENCIAL (dois últimos meses)"
-                ws_valor_res['A1'].font = Font(bold=True, size=14)
-
-                headers = [
-                    "Linha (índice)", "Empresa", "Empreendimento", "Bairro", "ANO_MES",
-                    "Oferta/Venda", "Quartos", "Valor Médio m² (Declarado)", "Limite Aceitável",
-                    "Média", "Desvio Padrão", "Área (contexto)"
-                ]
-                for col_idx, h in enumerate(headers, start=1):
-                    cell = ws_valor_res.cell(row=3, column=col_idx, value=h)
-                    cell.font = Font(bold=True)
-
-                row_idx = 4
-                for item in outliers_valor_res:
-                    ws_valor_res.cell(row=row_idx, column=1, value=item.get('index'))
-                    ws_valor_res.cell(row=row_idx, column=2, value=item.get('empresa'))
-                    ws_valor_res.cell(row=row_idx, column=3, value=item.get('empreendimento'))
-                    ws_valor_res.cell(row=row_idx, column=4, value=item.get('bairro'))
-                    ws_valor_res.cell(row=row_idx, column=5, value=item.get('ano_mes'))
-                    ws_valor_res.cell(row=row_idx, column=6, value=item.get('oferta_venda'))
-                    ws_valor_res.cell(row=row_idx, column=7, value=item.get('quartos'))
-                    ws_valor_res.cell(row=row_idx, column=8, value=item.get('valor_m2_declarado'))
-                    ws_valor_res.cell(row=row_idx, column=9, value=item.get('limite_valor_m2'))
-                    ws_valor_res.cell(row=row_idx, column=10, value=item.get('media'))
-                    ws_valor_res.cell(row=row_idx, column=11, value=item.get('desvio_padrao'))
-                    ws_valor_res.cell(row=row_idx, column=12, value=item.get('area_declarada'))
-                    row_idx += 1
-
-            outliers_valor_com = self._compute_valor_m2_outliers(df_comercial, comercial_name)
-            if outliers_valor_com:
-                print("Criando aba de outliers de VALOR_MEDIO_M2 comercial...")
-                ws_valor_com = wb.create_sheet('ValorM2_Comercial')
-                ws_valor_com['A1'] = "OUTLIERS DE VALOR MÉDIO M² - COMERCIAL (dois últimos meses)"
-                ws_valor_com['A1'].font = Font(bold=True, size=14)
-
-                headers = [
-                    "Linha (índice)", "Empresa", "Empreendimento", "Bairro", "ANO_MES",
-                    "Oferta/Venda", "Valor Médio m² (Declarado)", "Limite Aceitável",
-                    "Média", "Desvio Padrão", "Área (contexto)"
-                ]
-                for col_idx, h in enumerate(headers, start=1):
-                    cell = ws_valor_com.cell(row=3, column=col_idx, value=h)
-                    cell.font = Font(bold=True)
-
-                row_idx = 4
-                for item in outliers_valor_com:
-                    ws_valor_com.cell(row=row_idx, column=1, value=item.get('index'))
-                    ws_valor_com.cell(row=row_idx, column=2, value=item.get('empresa'))
-                    ws_valor_com.cell(row=row_idx, column=3, value=item.get('empreendimento'))
-                    ws_valor_com.cell(row=row_idx, column=4, value=item.get('bairro'))
-                    ws_valor_com.cell(row=row_idx, column=5, value=item.get('ano_mes'))
-                    ws_valor_com.cell(row=row_idx, column=6, value=item.get('oferta_venda'))
-                    ws_valor_com.cell(row=row_idx, column=7, value=item.get('valor_m2_declarado'))
-                    ws_valor_com.cell(row=row_idx, column=8, value=item.get('limite_valor_m2'))
-                    ws_valor_com.cell(row=row_idx, column=9, value=item.get('media'))
-                    ws_valor_com.cell(row=row_idx, column=10, value=item.get('desvio_padrao'))
-                    ws_valor_com.cell(row=row_idx, column=11, value=item.get('area_declarada'))
-                    row_idx += 1
-
-
-            # Criar abas de lançamentos se houver dados
-            if 'launches_analysis' in analysis_res and analysis_res['launches_analysis'].get('total_launches', 0) > 0:
+            # Criar abas de lançamentos sempre (exibe mensagem quando não há dados)
+            if 'launches_analysis' in analysis_res:
                 print("Criando aba de lançamentos residencial...")
                 self.create_launches_worksheet_with_empreendimentos(wb, analysis_res['launches_analysis'], 'Lancamentos_Residencial', 'RESIDENCIAL')
                 print("Lançamentos residenciais adicionados")
             
-            if 'launches_analysis' in analysis_com and analysis_com['launches_analysis'].get('total_launches', 0) > 0:
+            if 'launches_analysis' in analysis_com:
                 print("Criando aba de lançamentos comercial...")
                 self.create_launches_worksheet_with_empreendimentos(wb, analysis_com['launches_analysis'], 'Lancamentos_Comercial', 'COMERCIAL')
                 print("Lançamentos comerciais adicionados")
@@ -1527,81 +2035,159 @@ class IVVQualityControl:
             return ""
 
     def insert_pivot_table_with_formatting(self, worksheet, pivot_table, analysis_data, start_row=5):
-        """Insere tabela pivot no worksheet com formatação condicional"""
+        """Insere tabela pivot com layout visual melhorado: STATUS, cabeçalho em 2 níveis e cores por linha."""
         try:
-            from openpyxl.styles import Font, PatternFill
-            
-            red_font = Font(color="FF0000", bold=True, size=11)
-            yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-            bold_font = Font(bold=True)
-            
-            inactive_companies = analysis_data.get('inactive_companies', [])
-            logic_problems = analysis_data.get('logic_problems', [])
-            problem_companies = [p['empresa'] for p in logic_problems]
-            
-            
-            # Inserir cabeçalhos das colunas
-            col = 1
-            worksheet.cell(row=start_row, column=col, value="EMPRESA").font = bold_font
-            col += 1
-            
-            for col_name in pivot_table.columns:
-                if isinstance(col_name, tuple):
-                    header = f"{col_name[0]} {col_name[1]}"
+            from openpyxl.styles import Font, PatternFill, Alignment
+            from openpyxl.utils import get_column_letter
+            import pandas as pd
+
+            # ── Paleta ──────────────────────────────────────────────────────────
+            F_WHITE  = Font(color='FFFFFF', bold=True, size=10)
+            F_OK     = Font(color='1A6B3A', bold=True, size=10)
+            F_DIV    = Font(color='7D5800', bold=True, size=10)
+            F_INAT   = Font(color='CC0000', bold=True, size=10)
+            F_NEW    = Font(color='666666', bold=True, size=10)
+            F_NORMAL = Font(size=10)
+            F_LEGEND = Font(size=9, italic=True)
+
+            FILL_HDR_DARK  = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+            FILL_HDR_MED   = PatternFill(start_color='2E75B6', end_color='2E75B6', fill_type='solid')
+            FILL_HDR_LIGHT = PatternFill(start_color='BDD7EE', end_color='BDD7EE', fill_type='solid')
+            FILL_OK        = PatternFill(start_color='E8F5E9', end_color='E8F5E9', fill_type='solid')
+            FILL_DIV       = PatternFill(start_color='FFFACD', end_color='FFFACD', fill_type='solid')
+            FILL_INAT      = PatternFill(start_color='FFE0E0', end_color='FFE0E0', fill_type='solid')
+            FILL_NEW       = PatternFill(start_color='F5F5F5', end_color='F5F5F5', fill_type='solid')
+            FILL_TOTAL     = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+
+            CENTER = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            LEFT   = Alignment(horizontal='left',   vertical='center')
+
+            # ── Dados de análise ─────────────────────────────────────────────────
+            inactive_set   = {str(c).strip() for c in analysis_data.get('inactive_companies', [])}
+            problem_set    = {str(p['empresa']).strip() for p in analysis_data.get('logic_problems', [])}
+
+            # ── Estrutura de colunas ─────────────────────────────────────────────
+            months = sorted(
+                {col[0] for col in pivot_table.columns if isinstance(col, tuple)},
+                reverse=True
+            )
+            metrics_order  = ['OFERTA_TOTAL', 'OFERTADOS_LANCAMENTOS', 'VENDA', 'DISTRATO']
+            metric_labels  = {'OFERTA_TOTAL': 'OFERTA', 'OFERTADOS_LANCAMENTOS': 'LANÇAM.',
+                              'VENDA': 'VENDAS', 'DISTRATO': 'DISTRATO'}
+            n_met    = len(metrics_order)
+            COL_EMP  = 1
+            COL_STA  = 2
+            COL_DATA = 3
+            total_cols = COL_DATA + len(months) * n_met - 1
+
+            # ── Legenda (start_row) ──────────────────────────────────────────────
+            leg_row = start_row
+            legenda = [
+                ('✓ OK',            F_OK),
+                ('⚠ DIVERGÊNCIA',   F_DIV),
+                ('✗ AUSENTE',       F_INAT),
+                ('○ SEM HISTÓRICO', F_NEW),
+            ]
+            for i, (txt, fnt) in enumerate(legenda):
+                c = worksheet.cell(row=leg_row, column=1 + i * 2, value=txt)
+                c.font = fnt
+
+            # ── Cabeçalho de meses (start_row+1) ────────────────────────────────
+            mhdr = start_row + 1
+
+            for col, lbl in [(COL_EMP, 'EMPRESA'), (COL_STA, 'STATUS')]:
+                c = worksheet.cell(row=mhdr, column=col, value=lbl)
+                c.font = F_WHITE; c.fill = FILL_HDR_MED; c.alignment = CENTER
+                worksheet.merge_cells(
+                    start_row=mhdr, start_column=col,
+                    end_row=mhdr + 1, end_column=col
+                )
+
+            for m_i, month in enumerate(months):
+                cs = COL_DATA + m_i * n_met
+                ce = cs + n_met - 1
+                worksheet.merge_cells(start_row=mhdr, start_column=cs,
+                                      end_row=mhdr,   end_column=ce)
+                c = worksheet.cell(row=mhdr, column=cs, value=month)
+                c.font = F_WHITE; c.fill = FILL_HDR_MED; c.alignment = CENTER
+
+            # ── Sub-cabeçalhos de métricas (start_row+2) ────────────────────────
+            shdr = start_row + 2
+            for col in [COL_EMP, COL_STA]:
+                worksheet.cell(row=shdr, column=col).fill = FILL_HDR_LIGHT
+
+            for m_i, month in enumerate(months):
+                for mt_i, metric in enumerate(metrics_order):
+                    col = COL_DATA + m_i * n_met + mt_i
+                    c = worksheet.cell(row=shdr, column=col,
+                                       value=metric_labels.get(metric, metric))
+                    c.font = Font(bold=True, size=9, color='1F4E79')
+                    c.fill = FILL_HDR_LIGHT; c.alignment = CENTER
+
+            # ── Linhas de dados (start_row+3 em diante) ──────────────────────────
+            data_row = start_row + 3
+
+            for r_i, (empresa, row_data) in enumerate(pivot_table.iterrows()):
+                cur = data_row + r_i
+                emp = str(empresa).strip()
+                is_total = (emp == 'TOTAL GERAL')
+
+                if is_total:
+                    fill = FILL_TOTAL
+                    f_emp = f_sta = f_dat = F_WHITE
+                    sta_txt = ''
                 else:
-                    header = str(col_name)
-                cell = worksheet.cell(row=start_row, column=col, value=header)
-                cell.font = bold_font
-                col += 1
-            
-            # Inserir dados das empresas
-            for row_idx, (empresa, row_data) in enumerate(pivot_table.iterrows()):
-                current_row = start_row + 1 + row_idx
-                empresa_str = str(empresa).strip()
-                                
-                empresa_cell = worksheet.cell(row=current_row, column=1, value=empresa_str)
-                
-                # Verificar se empresa deve ser formatada
-                is_inactive = any(empresa_str == str(inactive).strip() for inactive in inactive_companies)
-                is_problem = any(empresa_str == str(problem).strip() for problem in problem_companies)
-                                
-                # Aplicar formatação condicional
-                try:
-                    if is_inactive:
-                        empresa_cell.font = red_font
-                    
-                    if is_problem:
-                        empresa_cell.fill = yellow_fill
-                        
-                except Exception as style_error:
-                    print(f"  - ERRO ao aplicar formatação: {style_error}")
-                
-                # Inserir dados da linha
-                for col_idx, value in enumerate(row_data):
-                    data_cell = worksheet.cell(row=current_row, column=col_idx + 2)
-                    
-                    try:
-                        numeric_value = float(value) if pd.notna(value) and value != 0 else 0
-                        data_cell.value = numeric_value
-                    except (ValueError, TypeError):
-                        data_cell.value = 0
-                    
-                    # Aplicar formatação amarela para toda a linha com problemas de lógica
-                    try:
-                        if is_problem:
-                            data_cell.fill = yellow_fill
-                    except Exception as cell_error:
-                        print(f"  - ERRO ao formatar célula de dados: {cell_error}")
-            
-            # Ajustar largura das colunas
-            worksheet.column_dimensions['A'].width = 25
-            for col_idx in range(2, col + 1):
-                try:
-                    col_letter = worksheet.cell(row=1, column=col_idx).column_letter
-                    worksheet.column_dimensions[col_letter].width = 15
-                except:
-                    pass
-                                
+                    is_inat = emp in inactive_set
+                    is_div  = emp in problem_set
+                    is_new  = False
+                    if len(months) > 1:
+                        prev = months[1]
+                        prev_vals = [row_data.get((prev, m), 0) for m in metrics_order
+                                     if (prev, m) in pivot_table.columns]
+                        is_new = all(v == 0 for v in prev_vals)
+
+                    if is_inat:
+                        fill = FILL_INAT; f_emp = f_sta = F_INAT
+                        sta_txt = '✗ AUSENTE'
+                    elif is_div:
+                        fill = FILL_DIV; f_emp = f_sta = F_DIV
+                        sta_txt = '⚠ DIVERGÊNCIA'
+                    elif is_new:
+                        fill = FILL_NEW; f_emp = f_sta = F_NEW
+                        sta_txt = '○ SEM HISTÓRICO'
+                    else:
+                        fill = FILL_OK; f_emp = f_sta = F_OK
+                        sta_txt = '✓ OK'
+                    f_dat = F_NORMAL
+
+                c = worksheet.cell(row=cur, column=COL_EMP, value=emp)
+                c.font = f_emp; c.fill = fill; c.alignment = LEFT
+
+                c = worksheet.cell(row=cur, column=COL_STA, value=sta_txt)
+                c.font = f_sta; c.fill = fill; c.alignment = CENTER
+
+                for m_i, month in enumerate(months):
+                    for mt_i, metric in enumerate(metrics_order):
+                        col = COL_DATA + m_i * n_met + mt_i
+                        val = row_data.get((month, metric), 0)
+                        try:
+                            val = int(float(val)) if pd.notna(val) else 0
+                        except (ValueError, TypeError):
+                            val = 0
+                        c = worksheet.cell(row=cur, column=col, value=val)
+                        c.fill = fill; c.font = f_dat if not is_total else F_WHITE
+                        c.alignment = CENTER
+
+            # ── Larguras ─────────────────────────────────────────────────────────
+            worksheet.column_dimensions[get_column_letter(COL_EMP)].width = 40
+            worksheet.column_dimensions[get_column_letter(COL_STA)].width = 17
+            for col in range(COL_DATA, total_cols + 1):
+                worksheet.column_dimensions[get_column_letter(col)].width = 11
+
+            worksheet.row_dimensions[mhdr].height = 22
+            worksheet.row_dimensions[shdr].height = 22
+            worksheet.freeze_panes = worksheet.cell(row=data_row, column=COL_DATA)
+
         except Exception as e:
             print(f"Erro ao inserir tabela com formatação: {e}")
             import traceback
@@ -1720,9 +2306,7 @@ class IVVQualityControl:
             errors.extend(self.validate_numeric_columns(df_residencial, residencial_name))
             errors.extend(self.check_missing_data(df_residencial, residencial_name))
             errors.extend(self.validate_data_consistency_filtered(df_residencial, residencial_name))
-            errors.extend(self.validate_area_outliers_std(df_residencial, residencial_name))
-            
-            errors.extend(self.validate_valor_m2_outliers_std(df_residencial, residencial_name))
+            errors.extend(self.validate_valor_m2_variation(df_residencial, residencial_name))
             statistics[f'residencial_{residencial_name}'] = self.generate_summary_statistics(df_residencial, residencial_name)
             
             # Processar aba comercial
@@ -1737,9 +2321,7 @@ class IVVQualityControl:
             errors.extend(self.validate_numeric_columns(df_comercial, comercial_name))
             errors.extend(self.check_missing_data(df_comercial, comercial_name))
             errors.extend(self.validate_data_consistency_filtered(df_comercial, comercial_name))
-            errors.extend(self.validate_area_outliers_std(df_comercial, comercial_name))
-            
-            errors.extend(self.validate_valor_m2_outliers_std(df_comercial, comercial_name))
+            errors.extend(self.validate_valor_m2_variation(df_comercial, comercial_name))
             statistics[f'comercial_{comercial_name}'] = self.generate_summary_statistics(df_comercial, comercial_name)
             
             print("Validações concluídas. Iniciando criação do arquivo de resumo...")
@@ -1763,47 +2345,6 @@ class IVVQualityControl:
         
         return errors, statistics, summary_path
 
-    def save_report(self, file_path: str, errors: List[str], statistics: Dict[str, Any]) -> str:
-        """Salva relatório de qualidade"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base_name = os.path.splitext(os.path.basename(file_path))[0]
-        directory = os.path.dirname(file_path)
-        report_path = os.path.join(directory, f"{base_name}_qualidade_{timestamp}.txt")
-        
-        with open(report_path, 'w', encoding='utf-8') as f:
-            f.write("=== RELATÓRIO DE CONTROLE DE QUALIDADE - PESQUISA IVV ===\n")
-            f.write(f"Arquivo: {os.path.basename(file_path)}\n")
-            f.write(f"Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
-            f.write("=" * 60 + "\n\n")
-            
-            f.write("ERROS ENCONTRADOS:\n")
-            f.write("-" * 20 + "\n")
-            if errors:
-                for i, error in enumerate(errors, 1):
-                    f.write(f"{i}. {error}\n")
-            else:
-                f.write("✓ Nenhum erro encontrado!\n")
-            
-            f.write("\n" + "=" * 60 + "\n\n")
-            
-            f.write("ESTATÍSTICAS RESUMO:\n")
-            f.write("-" * 20 + "\n")
-            for sheet_name, stats in statistics.items():
-                f.write(f"\n{sheet_name.upper()}:\n")
-                f.write(f"  Total de linhas: {stats.get('total_rows', 'N/A')}\n")
-                f.write(f"  Linhas vazias: {stats.get('empty_rows', 'N/A')}\n")
-                f.write(f"  Linhas duplicadas: {stats.get('duplicate_rows', 'N/A')}\n")
-                
-                if 'bairro_distribution' in stats:
-                    f.write("  Distribuição por bairro:\n")
-                    for bairro, count in stats['bairro_distribution'].items():
-                        f.write(f"    {bairro}: {count}\n")
-            
-            f.write("\n" + "=" * 60 + "\n")
-            f.write("Relatório gerado automaticamente pelo Sistema de Controle de Qualidade IVV\n")
-        
-        return report_path
-
     def run(self):
         """Executa o controle de qualidade"""
         print("=== CONTROLE DE QUALIDADE - PESQUISA IVV ===")
@@ -1819,8 +2360,6 @@ class IVVQualityControl:
         
         errors, statistics, summary_path = self.process_file(file_path)
         
-        report_path = self.save_report(file_path, errors, statistics)
-        
         print("\n" + "=" * 50)
         print("RESULTADOS DO CONTROLE DE QUALIDADE")
         print("=" * 50)
@@ -1834,9 +2373,6 @@ class IVVQualityControl:
         else:
             print("✅ Nenhum erro encontrado! Arquivo válido.")
         
-        print(f"\n📄 Relatório de qualidade salvo em:")
-        print(f"   {report_path}")
-        
         if summary_path:
             print(f"\n📊 Tabelas resumo geradas em:")
             print(f"   {summary_path}")
@@ -1844,22 +2380,25 @@ class IVVQualityControl:
             print(f"   • Empresas inativas (mês atual): texto em VERMELHO")
             print(f"   • Problemas de lógica de oferta: fundo AMARELO")
             print(f"   • Lógica: Oferta(atual) = Oferta(anterior) - Venda(anterior) + Distrato(anterior)")
-            print(f"\n📋 Abas adicionais:")
-            print(f"   • Lançamentos_Residencial: Detalhes por empresa e bairro")
-            print(f"   • Lançamentos_Comercial: Detalhes por empresa e bairro")
+            print(f"\n📋 Abas geradas:")
+            print(f"   • Resumo_Residencial / Resumo_Comercial: pivot por empresa e mês")
+            print(f"   • ValorM2_Residencial / ValorM2_Comercial: variações suspeitas de VALOR_MEDIO_M2")
+            print(f"     (CRÍTICO ≥{self.valor_m2_critical_threshold}%  |  ALERTA ≥{self.valor_m2_variation_threshold}%)")
+            print(f"   • Lancamentos_Residencial / Lancamentos_Comercial: detalhes por empreendimento")
         
         root = tk.Tk()
         root.withdraw()
         
         message = "Processamento concluído!\n\n"
-        message += f"📄 Relatório de qualidade: {os.path.basename(report_path)}\n"
         
         if summary_path:
             message += f"📊 Tabelas resumo: {os.path.basename(summary_path)}\n"
             message += "\n🎨 Formatação condicional aplicada:\n"
             message += "• Empresas inativas: texto VERMELHO\n"
             message += "• Problemas de lógica: fundo AMARELO\n"
-            message += "• Nova lógica considera ofertas esperadas\n"
+            message += f"\n📋 Validação de VALOR_MEDIO_M2:\n"
+            message += f"• CRÍTICO ≥{self.valor_m2_critical_threshold}%  |  ALERTA ≥{self.valor_m2_variation_threshold}%\n"
+            message += "• Abas ValorM2_Residencial e ValorM2_Comercial\n"
             message += "\n📋 Inclui análise de lançamentos:\n"
             message += "• Por empresa e por bairro\n"
             message += "• Detalhamento por mês"
